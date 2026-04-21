@@ -8,7 +8,10 @@
 
 ## Installation
 
-*(Coming soon — once published to PyPI)*
+For now, install locally:
+pip install -e .
+
+* *(This will change once published to PyPI)*
 
 ---
 
