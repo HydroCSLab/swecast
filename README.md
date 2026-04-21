@@ -1,8 +1,8 @@
 # SWECast (Snow Water Equivalent Forecasting)
 
 
-> ⚠️ **Development Status**
-> This is an early-stage development module and is **not yet yet functional**. APIs, behavior, and outputs will change.
+> **Development Status**
+> This is an early-stage development module and is **not yet functional**. APIs, behavior, and outputs will change.
 
 ---
 
@@ -17,8 +17,8 @@
 `swecast` requires access to external data services. You must set your Earthdata credentials as environment variables before running the module:
 
 ```bash
-export EARTHDATA_USERNAME=your_username
-export EARTHDATA_PASSWORD=your_password
+export EARTHDATA_USERNAME=your_earthdata_username
+export EARTHDATA_PASSWORD=your_earthdata_password
 ```
 
 Without these, data downloads will fail.
@@ -103,4 +103,4 @@ All outputs are written to the specified `output_dir`. The structure and formats
 ## Development Notes
 
 * This project is **actively under development**
-* Interfaces are **not stable yet**
+* Interfaces are **not yet stable**
