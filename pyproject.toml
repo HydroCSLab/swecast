@@ -1,0 +1,13 @@
+[project]
+dependencies = [
+  "numpy>=2.0",
+  "pandas>=3.0",
+  "requests>=2.32",
+  "scipy>=1.17",
+  "xarray>=2026.2.0",
+  "rioxarray>=0.22",
+  "rasterio>=1.5",
+  "shapely>=2.1",
+  "pyproj>=3.7",
+  "netCDF4>=1.7",
+]
