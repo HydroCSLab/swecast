@@ -26,22 +26,24 @@ _ENV_NSIDC = {
 
 
 def _check_packages(packages: dict, failures: list) -> None:
+    '''Check that required packages are installed, and report any missing ones.'''
     for import_name, pip_name in packages.items():
         try:
             __import__(import_name)
-            print(f"  [ok] {import_name}")
+            print(f"  Found package '{import_name}' (pip install {pip_name})")
         except ImportError:
-            print(f"  [MISSING] {import_name}  →  pip install {pip_name}")
+            print(f"  Missing package '{import_name}' (pip install {pip_name})")
             failures.append(f"Missing package '{import_name}' (pip install {pip_name})")
 
 
 def _check_env(env_vars: dict, failures: list) -> None:
+    '''Check that required environment variables are SET, and report any missing ones.'''
     missing = []
     for var, description in env_vars.items():
         if os.environ.get(var):
-            print(f"  [ok] {var}")
+            print(f" Found environment variable ${var} ({description})")
         else:
-            print(f"  [MISSING] {var}  —  {description}")
+            print(f" Missing environment variable ${var} ({description})")
             failures.append(f"Missing environment variable ${var} ({description})")
             missing.append(var)
     if missing:
@@ -51,6 +53,7 @@ def _check_env(env_vars: dict, failures: list) -> None:
 
 
 def _finish(failures: list, raise_on_error: bool) -> bool:
+    '''Print summary of preflight checks, and exit with error if any failed and raise_on_error is True.'''
     print()
     if failures:
         print(f"  {len(failures)} check(s) failed.\n")

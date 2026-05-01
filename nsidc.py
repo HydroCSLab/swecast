@@ -4,7 +4,7 @@ Requires NASA Earthdata credentials (username + password).
 Credentials can be set via manifest fields or environment variables
 EARTHDATA_USERNAME / EARTHDATA_PASSWORD.
 
-Files are organized by water year (Oct 1 – Sep 30).
+Files are organized by water year.
   URL: https://daacdata.apps.nsidc.org/pub/DATASETS/nsidc0719_SWE_Snow_Depth_v1/
   Name: 4km_SWE_Depth_WY{yyyy}_v01.nc
   Variables: SWE (mm H2O), DEPTH (mm)
@@ -14,15 +14,18 @@ import os
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
-
 import numpy as np
-import rioxarray  # noqa: F401  — registers .rio accessor on xarray
 import xarray as xr
 import requests
 import rasterio
 from scipy.ndimage import convolve
+from .prism import Manifest, _date_range
+from .preflight import preflight_nsidc
+from .stations import get_stations
+from rasterio.transform import from_bounds
+from scipy.ndimage import convolve
 
-_EARTHDATA_AUTH_HOST = "urs.earthdata.nasa.gov"
+_EARTHDATA_AUTH_HOST = "urs.earthdata.nasa.gov" # Thish might be a config option in the future.
 
 
 class _EarthdataSession(requests.Session):
@@ -43,8 +46,7 @@ class _EarthdataSession(requests.Session):
             return  # keep credentials for the OAuth login step
         super().rebuild_auth(prepared_request, response)
 
-from .prism import Manifest, _date_range
-from .preflight import preflight_nsidc
+
 
 NSIDC_BASE = (
     "https://daacdata.apps.nsidc.org/pub/DATASETS/"
@@ -130,7 +132,7 @@ def build_swe_stacks(
     Returns:
         dict mapping variable name -> output path  {"SWE": ..., "DEPTH": ...}
     """
-    from .stations import get_stations
+  
 
     preflight_nsidc()
     username = os.environ["EARTHDATA_USERNAME"]
@@ -163,7 +165,7 @@ def build_swe_stacks(
             clipped = _bbox_slice(da.to_dataset(name=variable), manifest.bbox)[variable]
 
             if profile is None:
-                from rasterio.transform import from_bounds
+                
                 lons = clipped.lon.values
                 lats = clipped.lat.values
                 transform = from_bounds(
@@ -184,7 +186,7 @@ def build_swe_stacks(
 
             arrays.append(clipped.values)
 
-        import rasterio
+        
         out_path = output_dir / f"{variable.lower()}_stack.tif"
         with rasterio.open(out_path, "w", **profile) as dst:
             for i, (arr, d) in enumerate(zip(arrays, dates), start=1):
@@ -201,9 +203,7 @@ def build_swe_stacks(
     return outputs
 
 
-import numpy as np
-import rasterio
-from scipy.ndimage import convolve
+
 
 
 def filled_data(data):
