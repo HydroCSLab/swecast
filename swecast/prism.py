@@ -171,11 +171,11 @@ def _download_bil(variable: str, d: date, cache_dir: Path) -> Path:
     bil_path = cache_dir / variable / f"{date_str}.bil"
 
     if bil_path.exists():
-        print(f"[sweforecast] {variable} {d}: using cached {bil_path}")
+        print(f"[swecast] {variable} {d}: using cached {bil_path}")
         return bil_path
 
     url = PRISM_BASE.format(variable=variable, date=date_str)
-    print(f"[sweforecast] {variable} {d}: downloading {url}")
+    print(f"[swecast] {variable} {d}: downloading {url}")
     resp = requests.get(url, timeout=120)
     resp.raise_for_status()
 
@@ -257,7 +257,7 @@ def build_npy_stacks(
     # in Extract_PCP.py / Extract_TEMP.py).
     sample_bil = _download_bil(VARIABLES[0], dates[0], cache_dir)
     h_grid, v_grid, width, height = _prism_bbox_indices(sample_bil, manifest.bbox)
-    print(f"[sweforecast] PRISM region: h_grid={h_grid}, v_grid={v_grid}, "
+    print(f"[swecast] PRISM region: h_grid={h_grid}, v_grid={v_grid}, "
           f"size=({height}, {width})")
 
     for variable in VARIABLES:
@@ -275,7 +275,7 @@ def build_npy_stacks(
         out_path = output_dir / f"{_NPY_NAME[variable]}.npy"
         np.save(out_path, np.array(ds))
         outputs[variable] = out_path
-        print(f"[sweforecast] {variable}: wrote {len(dates)}-day .npy stack -> {out_path}")
+        print(f"[swecast] {variable}: wrote {len(dates)}-day .npy stack -> {out_path}")
 
     return outputs
 
@@ -339,7 +339,7 @@ def build_stacks(
                 dst.update_tags(i, date=d.isoformat())
 
         outputs[variable] = out_path
-        print(f"[sweforecast] {variable}: wrote {len(dates)}-band stack -> {out_path}")
+        print(f"[swecast] {variable}: wrote {len(dates)}-band stack -> {out_path}")
 
     if write_npy:
         build_npy_stacks(manifest, output_dir, cache_dir=cache_dir)

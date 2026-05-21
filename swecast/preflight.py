@@ -1,4 +1,4 @@
-"""Environment preflight checks for sweforecast."""
+"""Environment preflight checks for swecast."""
 
 import os
 import sys
@@ -81,7 +81,7 @@ def preflight(raise_on_error: bool = True) -> bool:
     Add new checks here as functionality grows.
     """
     failures = []
-    print("sweforecast preflight checks")
+    print("swecast preflight checks")
     print("=" * 40)
     print("\nPackages:")
     _check_packages(_PACKAGES_PRISM, failures)
@@ -95,7 +95,7 @@ def preflight(raise_on_error: bool = True) -> bool:
 def preflight_models(raise_on_error: bool = True) -> bool:
     """Preflight checks for training"""
     failures = []
-    print("sweforecast preflight checks (models)")
+    print("swecast preflight checks (models)")
     print("=" * 40)
     print("\nPackages:")
     _check_packages(_PACKAGES_MODELS, failures)
@@ -105,7 +105,7 @@ def preflight_models(raise_on_error: bool = True) -> bool:
 def preflight_prism(raise_on_error: bool = True) -> bool:
     """Preflight checks for PRISM-only functionality (no Earthdata required)."""
     failures = []
-    print("sweforecast preflight checks (PRISM)")
+    print("swecast preflight checks (PRISM)")
     print("=" * 40)
     print("\nPackages:")
     _check_packages(_PACKAGES_PRISM, failures)
@@ -115,7 +115,7 @@ def preflight_prism(raise_on_error: bool = True) -> bool:
 def preflight_nsidc(raise_on_error: bool = True) -> bool:
     """Preflight checks for NSIDC SWE functionality (includes Earthdata credentials)."""
     failures = []
-    print("sweforecast preflight checks (NSIDC)")
+    print("swecast preflight checks (NSIDC)")
     print("=" * 40)
     print("\nPackages:")
     _check_packages(_PACKAGES_PRISM, failures)

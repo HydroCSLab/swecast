@@ -135,13 +135,13 @@ def _download_nc(wy: int, cache_dir: Path, username: str, password: str) -> Path
     dest = cache_dir / f"4km_SWE_Depth_WY{wy}_v01.nc"
     if dest.exists():
         if _is_valid_nc(dest):
-            print(f"[sweforecast] SWE WY{wy}: using cached {dest}")
+            print(f"[swecast] SWE WY{wy}: using cached {dest}")
             return dest
-        print(f"[sweforecast] SWE WY{wy}: cached file is corrupt, re-downloading")
+        print(f"[swecast] SWE WY{wy}: cached file is corrupt, re-downloading")
         dest.unlink()
 
     url = NSIDC_BASE.format(wy=wy)
-    print(f"[sweforecast] SWE WY{wy}: downloading {url}")
+    print(f"[swecast] SWE WY{wy}: downloading {url}")
     session = _EarthdataSession(username, password)
     with session.get(url, stream=True, timeout=300) as resp:
         resp.raise_for_status()
@@ -253,7 +253,7 @@ def build_swe_stacks(
                 dst.update_tags(i, date=d.isoformat())
 
         outputs[variable] = out_path
-        print(f"[sweforecast] {variable}: wrote {len(dates)}-band stack -> {out_path}")
+        print(f"[swecast] {variable}: wrote {len(dates)}-band stack -> {out_path}")
 
     # Clean up open datasets
     for ds in nc_by_wy.values():
@@ -313,7 +313,7 @@ def build_npy_swe_stacks(
     lat_lo, lat_hi, lon_lo, lon_hi = _nc_bbox_indices(sample_nc, manifest.bbox)
     height = lat_hi - lat_lo
     width = lon_hi - lon_lo
-    print(f"[sweforecast] SWE region: lat[{lat_lo}:{lat_hi}], lon[{lon_lo}:{lon_hi}] -> ({height}, {width})")
+    print(f"[swecast] SWE region: lat[{lat_lo}:{lat_hi}], lon[{lon_lo}:{lon_hi}] -> ({height}, {width})")
 
     # Build a (year, month, day) -> time-axis index map for each .nc, so we
     # can look up any calendar date in O(1).
@@ -359,7 +359,7 @@ def build_npy_swe_stacks(
         out_path = output_dir / f"{_NPY_NAME[variable]}.npy"
         np.save(out_path, ds_swe)
         outputs[variable] = out_path
-        print(f"[sweforecast] {variable}: wrote {len(dates)}-day .npy stack -> {out_path}")
+        print(f"[swecast] {variable}: wrote {len(dates)}-day .npy stack -> {out_path}")
 
     return outputs
 

@@ -52,7 +52,7 @@ def _save_model(model, output_dir, variant_default, save_model, model_format, mo
     else:
         path = os.path.join(output_dir, f"{base}.{model_format}")
     model.save(path)
-    print(f"[sweforecast] Saved trained model -> {path}")
+    print(f"[swecast] Saved trained model -> {path}")
     return path
 
 
@@ -132,7 +132,7 @@ def train_swe_forecast(filled_stacks, stations_csv, output_dir, *, manifest=None
 
     formatted_csv = output_dir / "stations_for_cells.csv"
     df.to_csv(formatted_csv, header=False, index=False)
-    print(f"[sweforecast] Filtered {in_bbox.sum()} stations within SWE bbox -> {formatted_csv}")
+    print(f"[swecast] Filtered {in_bbox.sum()} stations within SWE bbox -> {formatted_csv}")
 
     station_cells_path = output_dir / "station_cells.npy"
     bbox = getattr(manifest, "bbox", None) if manifest is not None else None

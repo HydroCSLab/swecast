@@ -40,10 +40,10 @@ FIELDS = [
 
 def fetch_stations():
     """Fetch all active SWE stations from the USDA AWDB API."""
-    print("[sweforecast] Fetching SWE stations from USDA AWDB API...")
+    print("[swecast] Fetching SWE stations from USDA AWDB API...")
     with urllib.request.urlopen(API_URL) as response:
         stations = json.loads(response.read())
-    print(f"[sweforecast] Fetched {len(stations)} stations.")
+    print(f"[swecast] Fetched {len(stations)} stations.")
     return stations
 
 
@@ -76,7 +76,7 @@ def get_stations(manifest: Manifest, output_dir: Path) -> Path:
         stations = fetch_stations()
         stations_to_csv(stations, cache_path)
     elif cache_path.exists():
-        print(f"[sweforecast] Using cached stations: {cache_path}")
+        print(f"[swecast] Using cached stations: {cache_path}")
     else:
         stations = fetch_stations()
         stations_to_csv(stations, cache_path)
