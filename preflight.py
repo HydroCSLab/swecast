@@ -24,6 +24,16 @@ _ENV_NSIDC = {
     "EARTHDATA_PASSWORD": "NASA Earthdata password",
 }
 
+# additional required
+_PACKAGES_MODELS = {
+    "tensorflow": "tensorflow",
+    "keras": "keras",
+    "optuna": "optuna",
+    "matplotlib": "matplotlib",
+    "pandas": "pandas",
+    "scipy": "scipy",
+}
+
 
 def _check_packages(packages: dict, failures: list) -> None:
     '''Check that required packages are installed, and report any missing ones.'''
@@ -76,8 +86,19 @@ def preflight(raise_on_error: bool = True) -> bool:
     print("\nPackages:")
     _check_packages(_PACKAGES_PRISM, failures)
     _check_packages(_PACKAGES_NSIDC, failures)
+    _check_packages(_PACKAGES_MODELS, failures)
     print("\nEnvironment variables:")
     _check_env(_ENV_NSIDC, failures)
+    return _finish(failures, raise_on_error)
+
+
+def preflight_models(raise_on_error: bool = True) -> bool:
+    """Preflight checks for training"""
+    failures = []
+    print("sweforecast preflight checks (models)")
+    print("=" * 40)
+    print("\nPackages:")
+    _check_packages(_PACKAGES_MODELS, failures)
     return _finish(failures, raise_on_error)
 
 

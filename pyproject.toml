@@ -10,4 +10,11 @@ dependencies = [
   "shapely>=2.1",
   "pyproj>=3.7",
   "netCDF4>=1.7",
+  "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+models = [
+  "tensorflow>=2.15",
+  "optuna>=3.5",
 ]

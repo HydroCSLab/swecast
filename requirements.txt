@@ -21,3 +21,7 @@ shapely==2.1.2
 six==1.17.0
 urllib3==2.6.3
 xarray==2026.2.0
+matplotlib>=3.8
+# Optional (for swecast.models / ConvLSTM training):
+# tensorflow>=2.15
+# optuna>=3.5
