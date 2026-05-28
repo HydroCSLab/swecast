@@ -20,8 +20,8 @@ pip install -e .
 `swecast` requires access to external data services. You must set your Earthdata credentials as environment variables before running the module:
 
 ```bash
-export EARTHDATA_USERNAME=your_earthdata_username
-export EARTHDATA_PASSWORD=your_earthdata_password
+export EARTHDATA_USERNAME='your_earthdata_username'
+export EARTHDATA_PASSWORD='your_earthdata_password'
 ```
 
 Without these, data downloads will fail.
