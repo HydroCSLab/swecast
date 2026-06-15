@@ -3,6 +3,99 @@
 > **Development Status**
 > This is an early-stage development module and is **not yet functional**. APIs, behavior, and outputs will change.
 
+<!-- vim-markdown-toc GFM -->
+
+* [Micromamba Environment Setup](#micromamba-environment-setup)
+  * [PyPI TensorFlow](#pypi-tensorflow)
+  * [Micromamba TensorFlow (not working)](#micromamba-tensorflow-not-working)
+* [Installation](#installation)
+* [Authentication](#authentication)
+* [Quick Start](#quick-start)
+* [Core Concepts](#core-concepts)
+  * [Manifest](#manifest)
+* [Main Functions](#main-functions)
+  * [`build_stacks(manifest, output_dir)`](#build_stacksmanifest-output_dir)
+  * [`build_swe_stacks(manifest, output_dir)`](#build_swe_stacksmanifest-output_dir)
+  * [`fill_stacks(stacks)`](#fill_stacksstacks)
+  * [`fetch_stations(...)`](#fetch_stations)
+  * [`stations_to_csv(...)`](#stations_to_csv)
+* [Output](#output)
+* [Development Notes](#development-notes)
+
+<!-- vim-markdown-toc -->
+
+## Micromamba Environment Setup
+
+### PyPI TensorFlow
+
+```bash
+# install micromamba
+curl -L https://micro.mamba.pm/install.sh | env \
+  BIN_FOLDER="$HOME/local/bin" \
+  PREFIX_LOCATION="$HOME/opt/micromamba" \
+  sh
+
+# create an alias
+echo "alias mm=micromamba" >> ~/.bashrc
+
+# source micromamba
+. ~/.bashrc
+
+mkdir -p ~/work/projects/swecast
+cd ~/work/projects/swecast
+git clone git@github.com:hydrocslab/swecast.git
+
+# the latest tensorflow supports python 3.13, but python=3.13 didn't work
+mm create -p ./env -y python=3.12
+mm activate ./env
+
+pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
+
+# make sure GPU is recognized
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+
+mkdir -p runs/example
+cd runs/example
+python ../../swecast/example.py
+```
+
+### Micromamba TensorFlow (not working)
+
+```bash
+# install micromamba
+curl -L https://micro.mamba.pm/install.sh | env \
+  BIN_FOLDER="$HOME/local/bin" \
+  PREFIX_LOCATION="$HOME/opt/micromamba" \
+  sh
+
+# create an alias
+echo "alias mm=micromamba" >> ~/.bashrc
+
+# source micromamba
+. ~/.bashrc
+
+mkdir -p ~/work/projects/swecast
+cd ~/work/projects/swecast
+git clone git@github.com:hydrocslab/swecast.git
+
+# install Python through tensorflow because tensorflow is usually a couple
+# versions behind Python in conda-forge
+mm create -p ./env -y tensorflow rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
+mm activate ./env
+
+# executable stack needed to be cleared on Slackware
+patchelf --clear-execstack $CONDA_PREFIX/lib/libtensorflow_cc.so.2
+
+# make sure GPU is recognized
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+
+mkdir -p runs/example
+cd runs/example
+python ../../swecast/example.py
+
+# after all this, it still didn't work
+```
+
 ## Installation
 
 For now, install locally:
