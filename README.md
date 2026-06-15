@@ -1,10 +1,7 @@
 # SWECast (Snow Water Equivalent Forecasting)
 
-
 > **Development Status**
 > This is an early-stage development module and is **not yet functional**. APIs, behavior, and outputs will change.
-
----
 
 ## Installation
 
@@ -12,8 +9,6 @@ For now, install locally:
 pip install -e .
 
 * *(This will change once published to PyPI)*
-
----
 
 ## Authentication
 
@@ -25,8 +20,6 @@ export EARTHDATA_PASSWORD='your_earthdata_password'
 ```
 
 Without these, data downloads will fail.
-
----
 
 ## Quick Start
 
@@ -52,8 +45,6 @@ swe_outputs = build_swe_stacks(manifest, output_dir="./output")
 fill_stacks(swe_outputs)
 ```
 
----
-
 ## Core Concepts
 
 ### Manifest
@@ -63,45 +54,31 @@ The `Manifest` object defines the scope of your data processing job:
 * **start / end**: Date range for the dataset
 * **bbox**: Geographic bounding box `(min_lon, min_lat, max_lon, max_lat)`
 
----
-
 ## Main Functions
 
 ### `build_stacks(manifest, output_dir)`
 
 Builds general geospatial data stacks for the given manifest.
 
----
-
 ### `build_swe_stacks(manifest, output_dir)`
 
 Builds Snow Water Equivalent (SWE) stacks.
-
----
 
 ### `fill_stacks(stacks)`
 
 Performs gap-filling on SWE stacks to handle missing data.
 
----
-
 ### `fetch_stations(...)`
 
 Fetches station metadata (usage still evolving).
-
----
 
 ### `stations_to_csv(...)`
 
 Exports station data to CSV format.
 
----
-
 ## Output
 
 All outputs are written to the specified `output_dir`. The structure and formats may change as the project evolves.
-
----
 
 ## Development Notes
 
