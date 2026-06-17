@@ -58,7 +58,7 @@ train_swe_pcp(
     batch_size=8,
 )
 
-# 3. SWE + TEMP (2 channels)
+# 3. SWE + TMP (2 channels)
 train_swe_tmp(
     swe_filled="./output/swe_filled.npy",
     tmp_filled="./output/tmp_filled.npy",
@@ -68,7 +68,7 @@ train_swe_tmp(
     batch_size=8,
 )
 
-# 4. SWE + TEMP + PCP (3 channels)
+# 4. SWE + TMP + PCP (3 channels)
 train_swe_tmp_pcp(
     swe_filled="./output/swe_filled.npy",
     tmp_filled="./output/tmp_filled.npy",
