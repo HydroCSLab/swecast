@@ -23,12 +23,12 @@ from .stations import (
 def __getattr__(name):
     """Lazy-import TF-dependent functions so importing swecast does not pull in TensorFlow."""
     _models_exports = {
-        "train_swe_forecast",
-        "train_swe_only",
+        "prepare_training_inputs",
+        "train_swe",
         "train_swe_pcp",
-        "train_swe_temp",
-        "train_swe_temp_pcp",
-        "train_temp_pcp",
+        "train_swe_tmp",
+        "train_swe_tmp_pcp",
+        "train_tmp_pcp",
         "optimize_hyper_parameters",
     }
     if name in _models_exports:
@@ -58,12 +58,12 @@ __all__ = [
     "stations_to_csv",
     "get_stations",
     "identify_station_cells",
-    "train_swe_forecast",
-    "train_swe_only",
+    "prepare_training_inputs",
+    "train_swe",
     "train_swe_pcp",
-    "train_swe_temp",
-    "train_swe_temp_pcp",
-    "train_temp_pcp",
+    "train_swe_tmp",
+    "train_swe_tmp_pcp",
+    "train_tmp_pcp",
     "optimize_hyper_parameters",
     "predict",
 ]

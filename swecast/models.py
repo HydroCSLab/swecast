@@ -3,18 +3,25 @@
 Mostly forklifted from the original per-variant scripts.
 """
 
+from dataclasses import dataclass
 import gc
 import os
 import time
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")  
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from tensorflow import keras
 from tensorflow.keras import layers
 from keras.models import Model
 from keras.layers import Input
 from .prism import _resolve
+
+
+@dataclass
+class TrainingInputs:
+    swe_filled: str
+    station_cells: str
 
 
 def _cleanup_keras_state():
@@ -56,38 +63,54 @@ def _save_model(model, output_dir, variant_default, save_model, model_format, mo
     return path
 
 
-def train_swe_forecast(filled_stacks, stations_csv, output_dir, *, manifest=None,
-                       cache_dir=None,
-                       num_days_train=None, num_data_used=None,
-                       epochs=None, batch_size=None,
-                       train_split=None, log_norm_divisor=None,
-                       early_stopping_patience=None, reduce_lr_patience=None,
-                       num_stations=None,
-                       save_model=None, model_format=None, model_filename=None):
-    """Train the SWE-only ConvLSTM from filled GeoTIFF stacks.
+def prepare_training_inputs(filled_stacks, stations_csv, output_dir, *, manifest=None,
+                            cache_dir=None) -> TrainingInputs:
+    """
+    Prepare inputs required for ConvLSTM training and evaluation.
 
-    Glue between the Manifest-driven build/fill pipeline and the
-    script-faithful ``train_swe_only`` forklift.
+    This function bridges the Manifest-driven data acquisition and preprocessing
+    workflow with the model training routines. It validates the presence of the
+    filled SWE stack, prepares station metadata, filters stations to the SWE
+    domain, and generates the station-to-grid-cell mapping used for station-based
+    evaluation.
 
     Parameters
     ----------
     filled_stacks : dict
-        Variable -> filled GeoTIFF path, as returned by ``fill_stacks``.
-        Must contain "SWE"; we expect ``swe_filled.npy`` next to that
-        GeoTIFF (fill_stacks writes it automatically when a sibling
-        swe.npy is present).
+        Variable-to-file mapping returned by ``fill_stacks``. Must contain
+        the key ``"SWE"`` corresponding to the filled SWE GeoTIFF stack.
+        A sibling ``swe_filled.npy`` file is expected to exist alongside
+        the GeoTIFF.
     stations_csv : str | Path
-        AWDB-style CSV with stationId / latitude / longitude columns
-        (as produced by ``stations.stations_to_csv``). Stations outside
-        the SWE stack's bbox are dropped.
+        CSV file containing station identifiers and coordinates, typically
+        produced by ``stations.stations_to_csv``. The file must contain
+        ``stationId``, ``latitude``, and ``longitude`` columns. Stations
+        outside the SWE stack extent are excluded.
     output_dir : str | Path
-        Where the loss curve, NS_stations.csv, etc. get written.
+        Directory where intermediate training inputs are written, including
+        filtered station files and station-cell mappings.
+    manifest : Manifest, optional
+        SWECAST manifest used to resolve configuration values such as the
+        study-area bounding box and cache directory.
     cache_dir : str | Path, optional
-        Where to look for cached NSIDC .nc files (needed for the lat/lon
-        grid in ``identify_station_cells``). Defaults to ``<swe_dir>/.cache``.
+        Directory containing cached NSIDC NetCDF files used to obtain the
+        latitude-longitude grid for station-cell identification. If not
+        specified, defaults to ``manifest.cache_dir`` when available, or
+        ``<swe_dir>/.cache``.
 
-    Remaining kwargs are forwarded to ``train_swe_only``; see there for
-    defaults.
+    Returns
+    -------
+    TrainingInputs
+        Dataclass containing paths required by the training routines:
+
+        * ``swe_filled`` -- path to ``swe_filled.npy``.
+        * ``station_cells`` -- path to ``station_cells.npy``.
+
+    Notes
+    -----
+    This function does not perform model training. It prepares the auxiliary
+    inputs required by ``train_swe()``, ``train_swe_pcp()``,
+    ``train_swe_tmp()``, and ``train_swe_tmp_pcp()``.
     """
     from pathlib import Path
     import pandas as pd
@@ -99,10 +122,10 @@ def train_swe_forecast(filled_stacks, stations_csv, output_dir, *, manifest=None
     output_dir.mkdir(parents=True, exist_ok=True)
 
     swe_tif = Path(filled_stacks["SWE"])
-    swe_npy = swe_tif.parent / "swe_filled.npy"
-    if not swe_npy.exists():
+    swe_filled = swe_tif.parent / "swe_filled.npy"
+    if not swe_filled.exists():
         raise FileNotFoundError(
-            f"Expected {swe_npy} alongside the filled SWE GeoTIFF. "
+            f"Expected {swe_filled} alongside the filled SWE GeoTIFF. "
             "Re-run build_swe_stacks (write_npy=True default) and fill_stacks."
         )
 
@@ -134,37 +157,21 @@ def train_swe_forecast(filled_stacks, stations_csv, output_dir, *, manifest=None
     df.to_csv(formatted_csv, header=False, index=False)
     print(f"[swecast] Filtered {in_bbox.sum()} stations within SWE bbox -> {formatted_csv}")
 
-    station_cells_path = output_dir / "station_cells.npy"
+    station_cells = output_dir / "station_cells.npy"
     bbox = getattr(manifest, "bbox", None) if manifest is not None else None
-    identify_station_cells(formatted_csv, nc_path, output_path=str(station_cells_path), bbox=bbox)
+    identify_station_cells(formatted_csv, nc_path, output_path=str(station_cells), bbox=bbox)
 
-    return train_swe_only(
-        swe_filled=str(swe_npy),
-        station_cells=str(station_cells_path),
-        output_dir=str(output_dir),
-        manifest=manifest,
-        num_days_train=num_days_train,
-        num_data_used=num_data_used,
-        epochs=epochs,
-        batch_size=batch_size,
-        train_split=train_split,
-        log_norm_divisor=log_norm_divisor,
-        early_stopping_patience=early_stopping_patience,
-        reduce_lr_patience=reduce_lr_patience,
-        num_stations=num_stations,
-        save_model=save_model,
-        model_format=model_format,
-        model_filename=model_filename,
-    )
+    return TrainingInputs(
+            swe_filled = swe_filled,
+            station_cells = station_cells)
 
 
-def train_swe_only(swe_filled, station_cells, output_dir, *, manifest=None,
-                   num_days_train=None, num_data_used=None,
-                   epochs=None, batch_size=None,
-                   train_split=None, log_norm_divisor=None,
-                   early_stopping_patience=None, reduce_lr_patience=None,
-                   num_stations=None,
-                   save_model=None, model_format=None, model_filename=None):
+def train_swe(swe_filled, station_cells, output_dir, *, manifest=None,
+              num_days_train=None, num_data_used=None, epochs=None,
+              batch_size=None, train_split=None, log_norm_divisor=None,
+              early_stopping_patience=None, reduce_lr_patience=None,
+              num_stations=None, save_model=None, model_format=None,
+              model_filename=None):
     """SWE-only ConvLSTM: previous N-1 days of SWE predict day N.
 
     Forklift of ConvLSTM_SWE_only.py. NS is reported against the 75 in-situ
@@ -613,7 +620,7 @@ def train_swe_pcp(swe_filled, pcp_filled, station_cells, output_dir, *, manifest
     _cleanup_keras_state()
 
 
-def train_swe_temp(swe_filled, tmp_filled, station_cells, output_dir, *, manifest=None,
+def train_swe_tmp(swe_filled, tmp_filled, station_cells, output_dir, *, manifest=None,
                    num_days_train=None, num_data_used=None,
                    epochs=None, batch_size=None,
                    train_split=None, log_norm_divisor=None,
@@ -776,7 +783,7 @@ def train_swe_temp(swe_filled, tmp_filled, station_cells, output_dir, *, manifes
     _cleanup_keras_state()
 
 
-def train_swe_temp_pcp(swe_filled, tmp_filled, pcp_filled, station_cells, output_dir, *, manifest=None,
+def train_swe_tmp_pcp(swe_filled, tmp_filled, pcp_filled, station_cells, output_dir, *, manifest=None,
                        num_days_train=None, num_data_used=None,
                        epochs=None, batch_size=None,
                        train_split=None, log_norm_divisor=None,
@@ -934,7 +941,7 @@ def train_swe_temp_pcp(swe_filled, tmp_filled, pcp_filled, station_cells, output
     _cleanup_keras_state()
 
 
-def train_temp_pcp(swe_filled, tmp_filled, pcp_filled, station_cells, output_dir, *, manifest=None,
+def train_tmp_pcp(swe_filled, tmp_filled, pcp_filled, station_cells, output_dir, *, manifest=None,
                    num_days_train=None, num_data_used=None,
                    epochs=None, batch_size=None,
                    train_split=None, log_norm_divisor=None,

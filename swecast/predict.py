@@ -30,14 +30,14 @@ from .nsidc import (
 )
 
 # Channel order per variant. Must match the order the model was trained with
-# (see train_swe_pcp / train_swe_temp / train_swe_temp_pcp / train_temp_pcp
+# (see train_swe_pcp / train_swe_tmp / train_swe_tmp_pcp / train_tmp_pcp
 # in models.py; they all stack as np.stack((swe, ...), axis=3) in this order).
 _VARIANTS = {
-    "swe_only":     ("SWE",),
+    "swe":          ("SWE",),
     "swe_pcp":      ("SWE", "PCP"),
-    "swe_temp":     ("SWE", "TEMP"),
-    "swe_temp_pcp": ("SWE", "TEMP", "PCP"),
-    "tmp_pcp":      ("TEMP", "PCP"),  # swe is only used for the actual comparison
+    "swe_tmp":     ("SWE", "TMP"),
+    "swe_tmp_pcp": ("SWE", "TMP", "PCP"),
+    "tmp_pcp":      ("TMP", "PCP"),  # swe is only used for the actual comparison
 }
 
 
@@ -87,7 +87,7 @@ def _fetch_prism_day(prism_var, d, cache_dir, bbox):
     return out
 
 
-def predict(model_path, target_date, manifest, *, variant="swe_only",
+def predict(model_path, target_date, manifest, *, variant="swe",
             cache_dir=None, num_days_train=None, log_norm_divisor=None,
             earthdata_username=None, earthdata_password=None):
     """Run a trained ConvLSTM on the inputs preceding ``target_date``.
@@ -106,7 +106,7 @@ def predict(model_path, target_date, manifest, *, variant="swe_only",
         Supplies bbox and (via ``_resolve``) defaults for cache_dir,
         num_days_train, and log_norm_divisor.
     variant : str
-        One of "swe_only", "swe_pcp", "swe_temp", "swe_temp_pcp",
+        One of "swe", "swe_pcp", "swe_tmp", "swe_tmp_pcp",
         "tmp_pcp". Has to match the channel layout the model was
         trained on.
     earthdata_username, earthdata_password : str, optional
@@ -179,7 +179,7 @@ def predict(model_path, target_date, manifest, *, variant="swe_only",
                 arr = _fetch_swe_day(d, nc_paths, lat_lo, lat_hi, lon_lo, lon_hi)
             elif ch == "PCP":
                 arr = _fetch_prism_day("ppt", d, cache_dir, manifest.bbox)
-            elif ch == "TEMP":
+            elif ch == "TMP":
                 arr = _fetch_prism_day("tmean", d, cache_dir, manifest.bbox)
             else:
                 raise ValueError(f"Unknown channel {ch!r}")
@@ -195,7 +195,7 @@ def predict(model_path, target_date, manifest, *, variant="swe_only",
         x[..., ch_idx] = filled_data(x[..., ch_idx])
 
     # Replicate training normalization: log10(1 + x) / log_norm_divisor on SWE.
-    # PCP/TEMP are fed raw (matching ConvLSTM_SWE_PCP / TEMP / TEMP_PCP scripts).
+    # PCP/TMP are fed raw (matching ConvLSTM_SWE_PCP / TMP / TMP_PCP scripts).
     if "SWE" in channels:
         swe_idx = channels.index("SWE")
         x[..., swe_idx] = np.log10(1 + x[..., swe_idx]) / log_norm_divisor
