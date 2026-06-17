@@ -47,11 +47,14 @@ git clone git@github.com:hydrocslab/swecast.git
 
 # the latest tensorflow supports python 3.13
 mm create -p ./env -y python=3.13
+mm activate ./env
+
+pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
 
 # add cuda lib paths to LD_LIBRARY_PATH automatically when activating the
 # environment
-mkdir -p env/etc/conda/activate.d
-cat > env/etc/conda/activate.d/tensorflow-cuda.sh <<'EOF'
+mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+cat > $CONDA_PREFIX/etc/conda/activate.d/tensorflow-cuda.sh <<'EOF'
 export LD_LIBRARY_PATH="$(python - <<'PY'
 import site
 from pathlib import Path
@@ -65,9 +68,8 @@ PY
 )${LD_LIBRARY_PATH:-}"
 EOF
 
+mm deactivate
 mm activate ./env
-
-pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
 
 # make sure GPU is recognized
 python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
