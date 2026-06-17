@@ -21,7 +21,9 @@ from .stations import (
 
 
 def __getattr__(name):
-    """Lazy-import TF-dependent functions so importing swecast does not pull in TensorFlow."""
+    """
+    Lazy-import TF-dependent functions so importing swecast does not pull in TensorFlow.
+    """
     _models_exports = {
         "prepare_training_inputs",
         "train_swe",

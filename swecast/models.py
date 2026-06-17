@@ -1,4 +1,5 @@
-"""ConvLSTM training and hyperparameter tuning.
+"""
+ConvLSTM training and hyperparameter tuning.
 
 Mostly forklifted from the original per-variant scripts.
 """

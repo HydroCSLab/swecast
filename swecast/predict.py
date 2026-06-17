@@ -43,7 +43,8 @@ _VARIANTS = {
 
 
 def _find_day_index(nc_path, target):
-    """Index along ``nc_path``'s time axis that matches ``target``.
+    """
+    Index along ``nc_path``'s time axis that matches ``target``.
 
     Uses the file's own time variable and units so we don't have to
     assume a particular water-year start or leap-day handling.
@@ -64,7 +65,9 @@ def _find_day_index(nc_path, target):
 
 
 def _fetch_swe_day(d, nc_paths, lat_lo, lat_hi, lon_lo, lon_hi):
-    """Read one day of SWE from the NSIDC NetCDF for water_year(d)."""
+    """
+    Read one day of SWE from the NSIDC NetCDF for water_year(d).
+    """
     wy = _water_year(d)
     if wy not in nc_paths:
         raise ValueError(f"No NSIDC file cached for water year {wy}")
@@ -77,7 +80,8 @@ def _fetch_swe_day(d, nc_paths, lat_lo, lat_hi, lon_lo, lon_hi):
 
 
 def _fetch_prism_day(prism_var, d, cache_dir, bbox):
-    """Read one day of PRISM ``prism_var`` and clip to bbox.
+    """
+    Read one day of PRISM ``prism_var`` and clip to bbox.
 
     Flips through v_grid / h_grid the same way the build pipeline does so
     rows come back north-to-south.
@@ -104,7 +108,8 @@ def predict(
     earthdata_username=None,
     earthdata_password=None,
 ):
-    """Run a trained ConvLSTM on the inputs preceding ``target_date``.
+    """
+    Run a trained ConvLSTM on the inputs preceding ``target_date``.
 
     Returns the predicted SWE for ``target_date`` along with the actual
     NSIDC-0719 SWE for that day and the residual.
