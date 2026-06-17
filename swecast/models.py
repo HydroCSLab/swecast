@@ -1297,29 +1297,21 @@ def optimize_hyper_parameters(swe_filled, output_dir, *, manifest=None, n_trials
     output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    # -------------------------------
     # Optional: Force CPU for testing if GPU is unstable
     # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-    # -------------------------------
 
-    # -------------------------------
     # Enable GPU memory growth (prevents tensor transfer errors)
-    # -------------------------------
     gpus = tf.config.list_physical_devices("GPU")
     if gpus:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
 
-    # -------------------------------
     # Load SWE data
-    # -------------------------------
     ds = np.load(swe_filled)
     num_data_used = 7300
     ds1 = ds[0:num_data_used, :, :]
 
-    # -------------------------------
     # Dataset preparation function
-    # -------------------------------
     def create_dataset(seq_length):
         dataset = []
         for i in range(0, num_data_used - seq_length):
@@ -1354,9 +1346,7 @@ def optimize_hyper_parameters(swe_filled, output_dir, *, manifest=None, n_trials
 
         return x_train, y_train, x_val, y_val
 
-    # -------------------------------
     # Build ConvLSTM model for a trial
-    # -------------------------------
     def build_model(trial, input_shape):
         x_in = keras.Input(shape=input_shape)
         num_layers = trial.suggest_int("num_layers", 1, 2)  # limit to 2 for GPU safety
@@ -1389,9 +1379,7 @@ def optimize_hyper_parameters(swe_filled, output_dir, *, manifest=None, n_trials
         )
         return model
 
-    # -------------------------------
     # Optuna objective function
-    # -------------------------------
     def objective(trial):
         # Suggest sequence length
         seq_length = trial.suggest_int(
@@ -1435,18 +1423,13 @@ def optimize_hyper_parameters(swe_filled, output_dir, *, manifest=None, n_trials
 
         return val_loss
 
-    # -------------------------------
-
     # Run Optuna study
-    # -------------------------------
     study = optuna.create_study(direction="minimize")
     study.optimize(objective, n_trials=n_trials)
 
     print("Best hyperparameters:", study.best_trial.params)
 
-    # -------------------------------
     # Save figure helper
-    # -------------------------------
     def save_plot(ax, filename):
         # Optuna's plot_* helpers return Axes, an ndarray of Axes, or a
         # Figure depending on the call. Coerce all three to a Figure.
@@ -1467,27 +1450,19 @@ def optimize_hyper_parameters(swe_filled, output_dir, *, manifest=None, n_trials
         fig.savefig(filename, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
-    # -------------------------------
     # 1. Optimization history
-    # -------------------------------
     ax1 = opt_viz.plot_optimization_history(study)
     save_plot(ax1, os.path.join(output_dir, "optuna_optimization_history.png"))
 
-    # -------------------------------
     # 2. Hyperparameter importance
-    # -------------------------------
     ax2 = opt_viz.plot_param_importances(study)
     save_plot(ax2, os.path.join(output_dir, "optuna_param_importance.png"))
 
-    # -------------------------------
     # 3. Slice plot
-    # -------------------------------
     ax3 = opt_viz.plot_slice(study)
     save_plot(ax3, os.path.join(output_dir, "optuna_slice_plot.png"))
 
-    # -------------------------------
     # 4. Parallel coordinate plot
-    # -------------------------------
     ax4 = opt_viz.plot_parallel_coordinate(study)
     save_plot(ax4, os.path.join(output_dir, "optuna_parallel_coordinate.png"))
 
