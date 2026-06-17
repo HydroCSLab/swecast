@@ -47,14 +47,13 @@ git clone git@github.com:hydrocslab/swecast.git
 
 # the latest tensorflow supports python 3.13
 mm create -p ./env -y python=3.13
-mm activate ./env
-
-pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
 
 # add cuda lib paths to LD_LIBRARY_PATH automatically when activating the
 # environment
-mkdir -p $CONDA_PREFIX/etc/conda/activate.d
-cat > $CONDA_PREFIX/etc/conda/activate.d/tensorflow-cuda.sh <<'EOF'
+mkdir -p env/etc/conda/activate.d
+cat > env/etc/conda/activate.d/tensorflow-cuda.sh <<'EOF'
+export _OLD_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
+
 export LD_LIBRARY_PATH="$(python - <<'PY'
 import site
 from pathlib import Path
@@ -65,11 +64,19 @@ for sp in site.getsitepackages():
         for lib in nvidia.glob("*/lib"):
             print(lib, end=":")
 PY
-)${LD_LIBRARY_PATH:-}"
+)$LD_LIBRARY_PATH"
 EOF
 
-mm deactivate
+mkdir -p env/etc/conda/deactivate.d
+cat > env/etc/conda/deactivate.d/tensorflow-cuda.sh <<'EOF'
+export LD_LIBRARY_PATH="$_OLD_LD_LIBRARY_PATH"
+EOF
+
 mm activate ./env
+
+pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
+
+. env/etc/conda/activate.d/tensorflow-cuda.sh
 
 # make sure GPU is recognized
 python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
