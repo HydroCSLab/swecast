@@ -7,7 +7,7 @@
 
 * [Micromamba environment](#micromamba-environment)
   * [PyPI TensorFlow](#pypi-tensorflow)
-    * [First-time setup](#first-time-setup)
+    * [Creating a new micromamba environment](#creating-a-new-micromamba-environment)
     * [Using an existing micromamba environment](#using-an-existing-micromamba-environment)
   * [Micromamba TensorFlow (not working)](#micromamba-tensorflow-not-working)
 * [Installation](#installation)
@@ -30,7 +30,7 @@
 
 ### PyPI TensorFlow
 
-#### First-time setup
+#### Creating a new micromamba environment
 
 ```bash
 # install micromamba
