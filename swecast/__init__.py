@@ -29,7 +29,7 @@ def __getattr__(name):
         "train_swe_tmp",
         "train_swe_tmp_pcp",
         "train_tmp_pcp",
-        "optimize_hyper_parameters",
+        "optimize_hyperparameters",
     }
     if name in _models_exports:
         from . import models
@@ -66,6 +66,6 @@ __all__ = [
     "train_swe_tmp",
     "train_swe_tmp_pcp",
     "train_tmp_pcp",
-    "optimize_hyper_parameters",
+    "optimize_hyperparameters",
     "predict",
 ]

@@ -1274,11 +1274,11 @@ def train_tmp_pcp(
     _cleanup_keras_state()
 
 
-def optimize_hyper_parameters(swe_filled, output_dir, *, manifest=None, n_trials=None):
+def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=None):
     """
     Optuna sweep over the SWE-only ConvLSTM.
 
-    Forklift of optimization_hyper_parameters.py. The search space is kept
+    Forklift of optimization_hyperparameters.py. The search space is kept
     deliberately small so trials fit on a single GPU; the Keras session is
     cleared between trials.
 
