@@ -22,7 +22,6 @@ from netCDF4 import Dataset as ncdataset
 from netCDF4 import num2date
 from .prism import Manifest, _date_range, _date_range_no_leap, _resolve
 from .preflight import preflight_nsidc
-from .stations import get_stations
 from rasterio.transform import from_bounds
 from scipy.ndimage import convolve
 
@@ -201,8 +200,6 @@ def build_swe_stacks(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = Path(cache_dir) if cache_dir else output_dir / ".cache"
-
-    get_stations(manifest, output_dir)
 
     dates = list(_date_range_no_leap(manifest.start, manifest.end))
     wys = _water_years(manifest.start, manifest.end)

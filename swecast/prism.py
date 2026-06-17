@@ -304,14 +304,11 @@ def build_stacks(
     """
     cache_dir = _resolve(cache_dir, manifest, "cache_dir", None)
     write_npy = _resolve(write_npy, manifest, "write_npy", True)
-    from .stations import get_stations
 
     preflight_prism()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = Path(cache_dir) if cache_dir else output_dir / ".cache"
-
-    get_stations(manifest, output_dir)
 
     geom = [box(*manifest.bbox).__geo_interface__]
     dates = list(_date_range_no_leap(manifest.start, manifest.end))

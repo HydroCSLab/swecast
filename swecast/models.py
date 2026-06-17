@@ -22,6 +22,8 @@ from .prism import _resolve
 @dataclass
 class TrainingInputs:
     swe_filled: str
+    pcp_filled: str
+    tmp_filled: str
     station_cells: str
 
 
@@ -67,7 +69,7 @@ def _save_model(
 
 
 def prepare_training_inputs(
-    filled_stacks, stations_csv, output_dir, *, manifest=None, cache_dir=None
+    output_dir, *, manifest=None, cache_dir=None
 ) -> TrainingInputs:
     """
     Prepare inputs required for ConvLSTM training and evaluation.
@@ -120,10 +122,27 @@ def prepare_training_inputs(
     import pandas as pd
     import rasterio
 
-    from .stations import identify_station_cells
+    from .nsidc import build_swe_stacks, fill_npy
+    from .prism import build_stacks
+    from .stations import get_stations, identify_station_cells
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    get_stations(manifest, output_dir)
+
+    # build stacks
+    outputs = build_stacks(manifest, output_dir=output_dir)
+    # swe stacks
+    swe_outputs = build_swe_stacks(manifest, output_dir=output_dir)
+
+    # Gap-fill SWE stacks (also fills sibling swe.npy -> swe_filled.npy)
+    filled_stacks = fill_stacks(swe_outputs)
+
+    # Gap-fill the PRISM .npy stacks too, since the multi-channel ConvLSTM
+    # variants expect pcp_filled.npy and tmp_filled.npy.
+    pcp_filled = fill_npy(output_dir / "pcp.npy")  # -> ./output/pcp_filled.npy
+    tmp_filled = fill_npy(output_dir / "tmp.npy")  # -> ./output/tmp_filled.npy
 
     swe_tif = Path(filled_stacks["SWE"])
     swe_filled = swe_tif.parent / "swe_filled.npy"
@@ -171,7 +190,12 @@ def prepare_training_inputs(
         formatted_csv, nc_path, output_path=str(station_cells), bbox=bbox
     )
 
-    return TrainingInputs(swe_filled=swe_filled, station_cells=station_cells)
+    return TrainingInputs(
+        swe_filled=swe_filled,
+        pcp_filled=pcp_filled,
+        tmp_filled=tmp_filled,
+        station_cells=station_cells,
+    )
 
 
 def train_swe(
