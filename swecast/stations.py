@@ -84,7 +84,9 @@ def get_stations(manifest: Manifest, output_dir: Path) -> Path:
     return cache_path
 
 
-def identify_station_cells(stations_csv, nc_path, output_path="station_cells.npy", bbox=None):
+def identify_station_cells(
+    stations_csv, nc_path, output_path="station_cells.npy", bbox=None
+):
     """Forklift of Identify_Station_Cells.py.
 
     Converts a station list (with replicates) to unique grid cells in the study

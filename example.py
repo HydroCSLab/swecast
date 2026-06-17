@@ -10,19 +10,18 @@ from swecast import (
     train_swe_tmp_pcp,
 )
 
-#defin a manifest for the data we want to use.
+# defin a manifest for the data we want to use.
 manifest = Manifest(
     start=date(2001, 1, 1),
     end=date(2021, 1, 1),
     bbox=(-121.9, 36.08, -109, 41.98),
-    num_data_used=5000, 
+    num_data_used=5000,
 )
 
 
-
-#build stacks
+# build stacks
 outputs = build_stacks(manifest, output_dir="./output")
-#swe stacks
+# swe stacks
 swe_outputs = build_swe_stacks(manifest, output_dir="./output")
 
 
@@ -43,10 +42,10 @@ inputs = prepare_training_inputs(
 
 # 1. SWE
 train_swe(
-        swe_filled=inputs.swe_filled,
-        station_cells=inputs.station_cells,
-        output_dir="./output/forecast_swe",
-        manifest=manifest,
+    swe_filled=inputs.swe_filled,
+    station_cells=inputs.station_cells,
+    output_dir="./output/forecast_swe",
+    manifest=manifest,
 )
 
 # 2. SWE + PCP (2 channels)

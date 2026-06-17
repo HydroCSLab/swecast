@@ -36,7 +36,7 @@ _PACKAGES_MODELS = {
 
 
 def _check_packages(packages: dict, failures: list) -> None:
-    '''Check that required packages are installed, and report any missing ones.'''
+    """Check that required packages are installed, and report any missing ones."""
     for import_name, pip_name in packages.items():
         try:
             __import__(import_name)
@@ -47,7 +47,7 @@ def _check_packages(packages: dict, failures: list) -> None:
 
 
 def _check_env(env_vars: dict, failures: list) -> None:
-    '''Check that required environment variables are SET, and report any missing ones.'''
+    """Check that required environment variables are SET, and report any missing ones."""
     missing = []
     for var, description in env_vars.items():
         if os.environ.get(var):
@@ -63,7 +63,7 @@ def _check_env(env_vars: dict, failures: list) -> None:
 
 
 def _finish(failures: list, raise_on_error: bool) -> bool:
-    '''Print summary of preflight checks, and exit with error if any failed and raise_on_error is True.'''
+    """Print summary of preflight checks, and exit with error if any failed and raise_on_error is True."""
     print()
     if failures:
         print(f"  {len(failures)} check(s) failed.\n")

@@ -13,7 +13,9 @@ from rasterio.mask import mask
 from shapely.geometry import box
 import requests
 
-PRISM_BASE = "https://services.nacse.org/prism/data/get/us/4km/{variable}/{date}?format=bil"
+PRISM_BASE = (
+    "https://services.nacse.org/prism/data/get/us/4km/{variable}/{date}?format=bil"
+)
 VARIABLES = ("ppt", "tmean")
 
 # Forklifted from Extract_PCP.py / Extract_TEMP.py.
@@ -99,6 +101,7 @@ class Manifest:
     Optuna tuning:
         n_trials          : number of Optuna trials (20)
     """
+
     start: date
     end: date
     bbox: tuple  # (minx, miny, maxx, maxy) in WGS84
@@ -130,7 +133,7 @@ class Manifest:
     # filename when model_filename is None, so multiple variants in one output_dir
     # don't clobber each other).
     save_model: bool = True
-    model_format: str = "keras"      # "keras" (recommended) or "h5"
+    model_format: str = "keras"  # "keras" (recommended) or "h5"
     model_filename: "str | None" = None
 
 
@@ -257,8 +260,10 @@ def build_npy_stacks(
     # in Extract_PCP.py / Extract_TEMP.py).
     sample_bil = _download_bil(VARIABLES[0], dates[0], cache_dir)
     h_grid, v_grid, width, height = _prism_bbox_indices(sample_bil, manifest.bbox)
-    print(f"[swecast] PRISM region: h_grid={h_grid}, v_grid={v_grid}, "
-          f"size=({height}, {width})")
+    print(
+        f"[swecast] PRISM region: h_grid={h_grid}, v_grid={v_grid}, "
+        f"size=({height}, {width})"
+    )
 
     for variable in VARIABLES:
         ds = []
@@ -319,17 +324,17 @@ def build_stacks(
         for d in dates:
             bil = _download_bil(variable, d, cache_dir)
             with rasterio.open(bil) as src:
-                    clipped, transform = mask(src, geom, crop=True, nodata=src.nodata)
-                    if profile is None:
-                        profile = src.profile.copy()
-                        profile.update(
-                            driver="GTiff",
-                            count=len(dates),
-                            transform=transform,
-                            height=clipped.shape[1],
-                            width=clipped.shape[2],
-                            compress="lzw",
-                        )
+                clipped, transform = mask(src, geom, crop=True, nodata=src.nodata)
+                if profile is None:
+                    profile = src.profile.copy()
+                    profile.update(
+                        driver="GTiff",
+                        count=len(dates),
+                        transform=transform,
+                        height=clipped.shape[1],
+                        width=clipped.shape[2],
+                        compress="lzw",
+                    )
             arrays.append(clipped[0])
 
         out_path = output_dir / f"{variable}_stack.tif"

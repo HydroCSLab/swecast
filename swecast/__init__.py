@@ -33,9 +33,11 @@ def __getattr__(name):
     }
     if name in _models_exports:
         from . import models
+
         return getattr(models, name)
     if name == "predict":
         from . import predict as _predict_mod
+
         return _predict_mod.predict
     raise AttributeError(f"module 'swecast' has no attribute {name!r}")
 

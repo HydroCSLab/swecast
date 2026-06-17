@@ -26,7 +26,9 @@ from .stations import get_stations
 from rasterio.transform import from_bounds
 from scipy.ndimage import convolve
 
-_EARTHDATA_AUTH_HOST = "urs.earthdata.nasa.gov" # Thish might be a config option in the future.
+_EARTHDATA_AUTH_HOST = (
+    "urs.earthdata.nasa.gov"  # Thish might be a config option in the future.
+)
 
 
 class _EarthdataSession(requests.Session):
@@ -47,7 +49,6 @@ class _EarthdataSession(requests.Session):
         if redirect_host == _EARTHDATA_AUTH_HOST:
             return  # keep credentials for the OAuth login step
         super().rebuild_auth(prepared_request, response)
-
 
 
 NSIDC_BASE = (
@@ -224,12 +225,16 @@ def build_swe_stacks(
             clipped = _bbox_slice(da.to_dataset(name=variable), manifest.bbox)[variable]
 
             if profile is None:
-                
+
                 lons = clipped.lon.values
                 lats = clipped.lat.values
                 transform = from_bounds(
-                    lons.min(), lats.min(), lons.max(), lats.max(),
-                    len(lons), len(lats),
+                    lons.min(),
+                    lats.min(),
+                    lons.max(),
+                    lats.max(),
+                    len(lons),
+                    len(lats),
                 )
                 profile = {
                     "driver": "GTiff",
@@ -245,7 +250,6 @@ def build_swe_stacks(
 
             arrays.append(clipped.values)
 
-        
         out_path = output_dir / f"{variable.lower()}_stack.tif"
         with rasterio.open(out_path, "w", **profile) as dst:
             for i, (arr, d) in enumerate(zip(arrays, dates), start=1):
@@ -305,7 +309,9 @@ def build_npy_swe_stacks(
     needed_wys = sorted({_water_year(d) for d in dates})
 
     # Download / locate every water-year .nc the date range touches
-    nc_paths = {wy: _download_nc(wy, cache_dir, username, password) for wy in needed_wys}
+    nc_paths = {
+        wy: _download_nc(wy, cache_dir, username, password) for wy in needed_wys
+    }
 
     # Region slice from manifest.bbox (replaces the original hardcoded
     # [:, 288:430, 75:385] in Extract_SWE.py).
@@ -313,7 +319,9 @@ def build_npy_swe_stacks(
     lat_lo, lat_hi, lon_lo, lon_hi = _nc_bbox_indices(sample_nc, manifest.bbox)
     height = lat_hi - lat_lo
     width = lon_hi - lon_lo
-    print(f"[swecast] SWE region: lat[{lat_lo}:{lat_hi}], lon[{lon_lo}:{lon_hi}] -> ({height}, {width})")
+    print(
+        f"[swecast] SWE region: lat[{lat_lo}:{lat_hi}], lon[{lon_lo}:{lon_hi}] -> ({height}, {width})"
+    )
 
     # Build a (year, month, day) -> time-axis index map for each .nc, so we
     # can look up any calendar date in O(1).
@@ -324,9 +332,7 @@ def build_npy_swe_stacks(
             date_objs = num2date(
                 times[:], times.units, getattr(times, "calendar", "standard")
             )
-        day_indices[wy] = {
-            (d.year, d.month, d.day): i for i, d in enumerate(date_objs)
-        }
+        day_indices[wy] = {(d.year, d.month, d.day): i for i, d in enumerate(date_objs)}
 
     outputs = {}
     for variable in variables:
@@ -364,21 +370,21 @@ def build_npy_swe_stacks(
     return outputs
 
 
-
 def filled_data(data):
-    #this function fill nan data using kernel of size 3x3x3. It averages data from kernel and fill it up
-    kernel = np.ones((3,3,3))/27 # kernel is 3d and it will give equal weightage to each cell
+    # this function fill nan data using kernel of size 3x3x3. It averages data from kernel and fill it up
+    kernel = (
+        np.ones((3, 3, 3)) / 27
+    )  # kernel is 3d and it will give equal weightage to each cell
     data_filled = data.copy()
     nan_mask = np.isnan(data_filled)
     # Convolve while keeping NaN values outside the kernel
-    data_convolved = convolve(np.nan_to_num(data), kernel, mode='constant', cval=0)
+    data_convolved = convolve(np.nan_to_num(data), kernel, mode="constant", cval=0)
 
     # Normalize by the valid neighbor count
-    neighbor_count = convolve(~nan_mask, kernel, mode='constant', cval=0)
+    neighbor_count = convolve(~nan_mask, kernel, mode="constant", cval=0)
     neighbor_count[neighbor_count == 0] = 1  # Avoid division by zero
 
     data_filled[nan_mask] = data_convolved[nan_mask] / neighbor_count[nan_mask]
-
 
     return data_filled
 
@@ -392,7 +398,9 @@ def fill_npy(file_path):
     file_path = str(file_path)
     data = np.load(file_path)
     data_filled = filled_data(data)
-    filename, ext = os.path.splitext(os.path.basename(file_path)) # Extract the filename without extension
+    filename, ext = os.path.splitext(
+        os.path.basename(file_path)
+    )  # Extract the filename without extension
 
     # Create the new filename
     new_filename = f"{filename}_filled{ext}"
@@ -458,5 +466,3 @@ def fill_stacks(stack_paths, output_dir=None, suffix="_filled"):
             fill_npy(sibling_npy)
 
     return outputs
-
-

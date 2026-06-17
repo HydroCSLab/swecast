@@ -33,11 +33,11 @@ from .nsidc import (
 # (see train_swe_pcp / train_swe_tmp / train_swe_tmp_pcp / train_tmp_pcp
 # in models.py; they all stack as np.stack((swe, ...), axis=3) in this order).
 _VARIANTS = {
-    "swe":          ("SWE",),
-    "swe_pcp":      ("SWE", "PCP"),
-    "swe_tmp":     ("SWE", "TMP"),
+    "swe": ("SWE",),
+    "swe_pcp": ("SWE", "PCP"),
+    "swe_tmp": ("SWE", "TMP"),
     "swe_tmp_pcp": ("SWE", "TMP", "PCP"),
-    "tmp_pcp":      ("TMP", "PCP"),  # swe is only used for the actual comparison
+    "tmp_pcp": ("TMP", "PCP"),  # swe is only used for the actual comparison
 }
 
 
@@ -53,7 +53,11 @@ def _find_day_index(nc_path, target):
             times[:], times.units, getattr(times, "calendar", "standard")
         )
     for i, d_obj in enumerate(date_objs):
-        if (d_obj.year, d_obj.month, d_obj.day) == (target.year, target.month, target.day):
+        if (d_obj.year, d_obj.month, d_obj.day) == (
+            target.year,
+            target.month,
+            target.day,
+        ):
             return i
     raise ValueError(f"Date {target.isoformat()} not found in {nc_path}")
 
@@ -87,9 +91,18 @@ def _fetch_prism_day(prism_var, d, cache_dir, bbox):
     return out
 
 
-def predict(model_path, target_date, manifest, *, variant="swe",
-            cache_dir=None, num_days_train=None, log_norm_divisor=None,
-            earthdata_username=None, earthdata_password=None):
+def predict(
+    model_path,
+    target_date,
+    manifest,
+    *,
+    variant="swe",
+    cache_dir=None,
+    num_days_train=None,
+    log_norm_divisor=None,
+    earthdata_username=None,
+    earthdata_password=None,
+):
     """Run a trained ConvLSTM on the inputs preceding ``target_date``.
 
     Returns the predicted SWE for ``target_date`` along with the actual
@@ -131,9 +144,7 @@ def predict(model_path, target_date, manifest, *, variant="swe",
     preflight_models()
 
     if variant not in _VARIANTS:
-        raise ValueError(
-            f"variant must be one of {tuple(_VARIANTS)}; got {variant!r}"
-        )
+        raise ValueError(f"variant must be one of {tuple(_VARIANTS)}; got {variant!r}")
     channels = _VARIANTS[variant]
 
     cache_dir = _resolve(cache_dir, manifest, "cache_dir", None)
