@@ -45,8 +45,26 @@ mkdir -p ~/work/projects/swecast
 cd ~/work/projects/swecast
 git clone git@github.com:hydrocslab/swecast.git
 
-# the latest tensorflow supports python 3.13, but python=3.13 didn't work
-mm create -p ./env -y python=3.12
+# the latest tensorflow supports python 3.13
+mm create -p ./env -y python=3.13
+
+# add cuda lib paths to LD_LIBRARY_PATH automatically when activating the
+# environment
+mkdir -p env/etc/conda/activate.d
+cat > env/etc/conda/activate.d/tensorflow-cuda.sh <<'EOF'
+export LD_LIBRARY_PATH="$(python - <<'PY'
+import site
+from pathlib import Path
+
+for sp in site.getsitepackages():
+    nvidia = Path(sp) / "nvidia"
+    if nvidia.exists():
+        for lib in nvidia.glob("*/lib"):
+            print(lib, end=":")
+PY
+)${LD_LIBRARY_PATH:-}"
+EOF
+
 mm activate ./env
 
 pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
