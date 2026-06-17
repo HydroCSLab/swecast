@@ -1,4 +1,5 @@
-"""Download NSIDC-0719 SWE/Depth NetCDF files and build stacked GeoTIFFs.
+"""
+Download NSIDC-0719 SWE/Depth NetCDF files and build stacked GeoTIFFs.
 
 Needs NASA Earthdata credentials. Set them on the manifest or via the
 EARTHDATA_USERNAME / EARTHDATA_PASSWORD environment variables.
@@ -31,7 +32,8 @@ _EARTHDATA_AUTH_HOST = (
 
 
 class _EarthdataSession(requests.Session):
-    """requests.Session that survives Earthdata's OAuth redirect chain.
+    """
+    requests.Session that survives Earthdata's OAuth redirect chain.
 
     The DAAC bounces us to urs.earthdata.nasa.gov for OAuth. Keeping
     Basic Auth attached during that hop lets the login complete without
@@ -68,7 +70,8 @@ _NPY_NAME = {"SWE": "swe", "DEPTH": "depth"}
 
 
 def _nc_bbox_indices(nc_path, bbox):
-    """Convert (minx, miny, maxx, maxy) into integer lat/lon slice indices.
+    """
+    Convert (minx, miny, maxx, maxy) into integer lat/lon slice indices.
 
     Used by build_npy_swe_stacks for the SWE region slice and by
     identify_station_cells for the corner offset that maps global grid
@@ -107,12 +110,16 @@ def _nc_bbox_indices(nc_path, bbox):
 
 
 def _water_year(d: date) -> int:
-    """Water year (Oct 1 to Sep 30) for a date."""
+    """
+    Water year (Oct 1 to Sep 30) for a date.
+    """
     return d.year + 1 if d.month >= 10 else d.year
 
 
 def _water_years(start: date, end: date) -> list[int]:
-    """Sorted list of water years that [start, end] touches."""
+    """
+    Sorted list of water years that [start, end] touches.
+    """
     wys = set()
     for d in _date_range(start, end):
         wys.add(_water_year(d))
@@ -162,7 +169,9 @@ def _download_nc(wy: int, cache_dir: Path, username: str, password: str) -> Path
 
 
 def _bbox_slice(ds: xr.Dataset, bbox: tuple) -> xr.Dataset:
-    """Clip ``ds`` to bbox (minx, miny, maxx, maxy) using its lat/lon coords."""
+    """
+    Clip ``ds`` to bbox (minx, miny, maxx, maxy) using its lat/lon coords.
+    """
     minx, miny, maxx, maxy = bbox
     lat = ds["lat"].values
     lat_slice = slice(miny, maxy) if lat[0] < lat[-1] else slice(maxy, miny)
@@ -176,7 +185,8 @@ def build_swe_stacks(
     write_npy: bool | None = None,
     variables: tuple | None = None,
 ) -> dict[str, Path]:
-    """Download NSIDC-0719 SWE/DEPTH per day, clip to bbox, write band-per-day GeoTIFFs.
+    """
+    Download NSIDC-0719 SWE/DEPTH per day, clip to bbox, write band-per-day GeoTIFFs.
 
     Needs $EARTHDATA_USERNAME and $EARTHDATA_PASSWORD set.
 
@@ -272,7 +282,8 @@ def build_npy_swe_stacks(
     cache_dir: Path | None = None,
     variables: tuple | None = None,
 ) -> dict[str, Path]:
-    """Forklift of Extract_SWE.py, retimed so the time axis lines up with PRISM.
+    """
+    Forklift of Extract_SWE.py, retimed so the time axis lines up with PRISM.
 
     Walks calendar dates from manifest.start to manifest.end (skipping
     Feb 29 since NSIDC-0719 has no leap days) and writes (T, H, W) stacks:
@@ -387,7 +398,8 @@ def filled_data(data):
 
 
 def fill_npy(file_path):
-    """Forklift of Fill_Missing_Data.py.
+    """
+    Forklift of Fill_Missing_Data.py.
 
     Loads a .npy stack, gap-fills NaNs with a 3x3x3 kernel, and writes
     the result to ``{stem}_filled{ext}`` next to the input.
@@ -408,7 +420,9 @@ def fill_npy(file_path):
 
 
 def _read_stack(tif_path):
-    """Read a multi-band GeoTIFF as (bands, rows, cols) float + rasterio profile."""
+    """
+    Read a multi-band GeoTIFF as (bands, rows, cols) float + rasterio profile.
+    """
     with rasterio.open(tif_path) as src:
         data = src.read().astype(np.float32)
         profile = src.profile.copy()
@@ -419,14 +433,17 @@ def _read_stack(tif_path):
 
 
 def _write_stack(out_path, data, profile):
-    """Write a 3D array as a multi-band GeoTIFF, keeping the input's georeferencing."""
+    """
+    Write a 3D array as a multi-band GeoTIFF, keeping the input's georeferencing.
+    """
     profile.update(dtype="float32", count=data.shape[0], nodata=np.nan)
     with rasterio.open(out_path, "w", **profile) as dst:
         dst.write(data.astype(np.float32))
 
 
 def fill_stacks(stack_paths, output_dir=None, suffix="_filled"):
-    """Fill NaN values in raster stacks (SWE, DEPTH, ...).
+    """
+    Fill NaN values in raster stacks (SWE, DEPTH, ...).
 
     Parameters
     ----------

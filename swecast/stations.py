@@ -1,4 +1,6 @@
-"""Fetch active SWE stations from the USDA AWDB REST API and export to CSV."""
+"""
+Fetch active SWE stations from the USDA AWDB REST API and export to CSV.
+"""
 
 import csv
 import json
@@ -39,7 +41,9 @@ FIELDS = [
 
 
 def fetch_stations():
-    """Fetch all active SWE stations from the USDA AWDB API."""
+    """
+    Fetch all active SWE stations from the USDA AWDB API.
+    """
     print("[swecast] Fetching SWE stations from USDA AWDB API...")
     with urllib.request.urlopen(API_URL) as response:
         stations = json.loads(response.read())
@@ -48,7 +52,9 @@ def fetch_stations():
 
 
 def stations_to_csv(stations, output_path):
-    """Write a list of station dicts to CSV."""
+    """
+    Write a list of station dicts to CSV.
+    """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", newline="") as f:
@@ -62,7 +68,8 @@ def stations_to_csv(stations, output_path):
 
 
 def get_stations(manifest: Manifest, output_dir: Path) -> Path:
-    """Resolve the stations CSV, fetching from the API if needed.
+    """
+    Resolve the stations CSV, fetching from the API if needed.
 
     - If manifest.fetch_stations is True, always fetch fresh data.
     - Otherwise, use the cached CSV if it exists, or fetch if it doesn't.
@@ -87,7 +94,8 @@ def get_stations(manifest: Manifest, output_dir: Path) -> Path:
 def identify_station_cells(
     stations_csv, nc_path, output_path="station_cells.npy", bbox=None
 ):
-    """Forklift of Identify_Station_Cells.py.
+    """
+    Forklift of Identify_Station_Cells.py.
 
     Converts a station list (with replicates) to unique grid cells in the study
     region defined by ``bbox`` and writes the result to ``output_path``.

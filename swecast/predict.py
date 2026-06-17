@@ -1,4 +1,5 @@
-"""Run a trained ConvLSTM on a target date and compare against the actual SWE.
+"""
+Run a trained ConvLSTM on a target date and compare against the actual SWE.
 
 Retrospective validation: pick a date covered by NSIDC-0719, have the
 model forecast that day's SWE from the (num_days_train - 1) days

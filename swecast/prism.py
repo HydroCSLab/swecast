@@ -1,4 +1,6 @@
-"""Download PRISM daily ppt/tmean BIL files and build stacked GeoTIFFs."""
+"""
+Download PRISM daily ppt/tmean BIL files and build stacked GeoTIFFs.
+"""
 
 import io
 import zipfile
@@ -28,7 +30,9 @@ _NPY_NAME = {"ppt": "pcp", "tmean": "tmp"}
 
 
 def _read_bil_hdr(bil):
-    """Parse the .hdr sidecar of a PRISM .bil file and return its full metadata dict."""
+    """
+    Parse the .hdr sidecar of a PRISM .bil file and return its full metadata dict.
+    """
     bil = str(bil)
     hdr = bil.replace(".bil", ".hdr")
     meta = {}
@@ -41,7 +45,8 @@ def _read_bil_hdr(bil):
 
 
 def _prism_bbox_indices(bil, bbox):
-    """Convert a (minx, miny, maxx, maxy) bbox to (h_grid, v_grid, width, height)
+    """
+    Convert a (minx, miny, maxx, maxy) bbox to (h_grid, v_grid, width, height)
     using the geographic metadata (ULXMAP, ULYMAP, XDIM, YDIM) in the .bil's .hdr.
 
     h_grid = column index of minx (west edge of bbox)
@@ -71,7 +76,8 @@ def _prism_bbox_indices(bil, bbox):
 
 @dataclass
 class Manifest:
-    """Job specification for a swecast run.
+    """
+    Job specification for a swecast run.
 
     Required fields define scope:
         start, end : date range
@@ -138,7 +144,8 @@ class Manifest:
 
 
 def _resolve(value, manifest, attr, default):
-    """Resolve a parameter using the precedence: explicit value > manifest field > default.
+    """
+    Resolve a parameter using the precedence: explicit value > manifest field > default.
 
     Returns ``value`` if not None; else ``getattr(manifest, attr)`` if a manifest
     is provided; else ``default``.
@@ -158,7 +165,8 @@ def _date_range(start: date, end: date):
 
 
 def _date_range_no_leap(start: date, end: date):
-    """Yield dates from start to end (inclusive), skipping Feb 29.
+    """
+    Yield dates from start to end (inclusive), skipping Feb 29.
 
     NSIDC-0719 uses a 365-day calendar (omits Feb 29). For PRISM and NSIDC
     .npy stacks to share a time axis, both builders iterate this filtered
@@ -206,7 +214,8 @@ def _download_bil(variable: str, d: date, cache_dir: Path) -> Path:
 
 
 def read_bil_file(bil):
-    """Forklifted from Extract_PCP.py.
+    """
+    Forklifted from Extract_PCP.py.
 
     Reads a PRISM .bil file by parsing its sibling .hdr metadata and returns a 2D numpy array.
     The numpy-based reader works for both ppt and tmean (Extract_TEMP.py used GDAL but
@@ -236,7 +245,8 @@ def build_npy_stacks(
     output_dir: Path,
     cache_dir: Path | None = None,
 ) -> dict[str, Path]:
-    """Forklift of Extract_PCP.py and Extract_TEMP.py.
+    """
+    Forklift of Extract_PCP.py and Extract_TEMP.py.
 
     Downloads PRISM ppt and tmean BIL files for each day in manifest and writes
     flat .npy stacks matching the original scripts:

@@ -28,7 +28,9 @@ class TrainingInputs:
 
 
 def _cleanup_keras_state():
-    """Reset TF state between back-to-back train_* calls so we don't OOM."""
+    """
+    Reset TF state between back-to-back train_* calls so we don't OOM.
+    """
     # Without this the OOM killer eventually catches up with us when
     # several variants run in the same process.
     keras.backend.clear_session()
@@ -36,7 +38,8 @@ def _cleanup_keras_state():
 
 
 def _align_shapes(*arrays):
-    """Crop (T, H, W) arrays to the smallest common (H, W).
+    """
+    Crop (T, H, W) arrays to the smallest common (H, W).
 
     NSIDC and PRISM resolve the same bbox via different code paths
     (searchsorted vs. round-to-cell) so they can disagree by a row or
@@ -51,7 +54,8 @@ def _align_shapes(*arrays):
 def _save_model(
     model, output_dir, variant_default, save_model, model_format, model_filename
 ):
-    """Save ``model`` and return the path, or None if disabled.
+    """
+    Save ``model`` and return the path, or None if disabled.
 
     ``model_filename`` (if given) overrides ``variant_default``; an explicit
     .keras / .h5 extension is respected as-is.
@@ -74,62 +78,65 @@ def prepare_training_inputs(
     """
     Prepare inputs required for ConvLSTM training and evaluation.
 
-    This function bridges the Manifest-driven data acquisition and preprocessing
-    workflow with the model training routines. It validates the presence of the
-    filled SWE stack, prepares station metadata, filters stations to the SWE
-    domain, and generates the station-to-grid-cell mapping used for station-based
-    evaluation.
+    This function executes the SWECAST data-preparation workflow and generates
+    the intermediate files required by the ConvLSTM training routines. The
+    workflow includes station acquisition, PRISM and NSIDC stack generation,
+    gap filling, and construction of station-to-grid-cell mappings used for
+    station-based model evaluation.
 
     Parameters
     ----------
-    filled_stacks : dict
-        Variable-to-file mapping returned by ``fill_stacks``. Must contain
-        the key ``"SWE"`` corresponding to the filled SWE GeoTIFF stack.
-        A sibling ``swe_filled.npy`` file is expected to exist alongside
-        the GeoTIFF.
-    stations_csv : str | Path
-        CSV file containing station identifiers and coordinates, typically
-        produced by ``stations.stations_to_csv``. The file must contain
-        ``stationId``, ``latitude``, and ``longitude`` columns. Stations
-        outside the SWE stack extent are excluded.
     output_dir : str | Path
-        Directory where intermediate training inputs are written, including
-        filtered station files and station-cell mappings.
+        Directory where intermediate datasets, training inputs, and evaluation
+        files are written. The directory is created if it does not already
+        exist.
     manifest : Manifest, optional
-        SWECAST manifest used to resolve configuration values such as the
-        study-area bounding box and cache directory.
+        SWECAST manifest specifying the study period, spatial domain, data
+        acquisition settings, and training configuration.
     cache_dir : str | Path, optional
         Directory containing cached NSIDC NetCDF files used to obtain the
-        latitude-longitude grid for station-cell identification. If not
-        specified, defaults to ``manifest.cache_dir`` when available, or
-        ``<swe_dir>/.cache``.
+        latitude-longitude grid required for station-cell identification.
+        If not specified, defaults to ``manifest.cache_dir`` when available,
+        or ``<output_dir>/.cache``.
 
     Returns
     -------
     TrainingInputs
         Dataclass containing paths required by the training routines:
 
-        * ``swe_filled`` -- path to ``swe_filled.npy``.
-        * ``station_cells`` -- path to ``station_cells.npy``.
+        * ``swe_filled`` -- gap-filled SWE stack (``swe_filled.npy``).
+        * ``pcp_filled`` -- gap-filled precipitation stack (``pcp_filled.npy``).
+        * ``tmp_filled`` -- gap-filled temperature stack (``tmp_filled.npy``).
+        * ``station_cells`` -- station-to-grid-cell mapping
+          (``station_cells.npy``).
 
     Notes
     -----
-    This function does not perform model training. It prepares the auxiliary
-    inputs required by ``train_swe()``, ``train_swe_pcp()``,
-    ``train_swe_tmp()``, and ``train_swe_tmp_pcp()``.
+    This function performs data acquisition and preprocessing but does not
+    perform model training. It prepares the inputs required by
+    ``train_swe()``, ``train_swe_pcp()``, ``train_swe_tmp()``, and
+    ``train_swe_tmp_pcp()``.
+
+    The generated workflow includes:
+
+    1. Acquisition of station metadata.
+    2. Construction of PRISM and NSIDC data stacks.
+    3. Gap filling of SWE, precipitation, and temperature datasets.
+    4. Filtering of stations to the study domain.
+    5. Identification of station grid-cell locations for evaluation.
     """
     from pathlib import Path
     import pandas as pd
     import rasterio
 
-    from .nsidc import build_swe_stacks, fill_npy
+    from .nsidc import build_swe_stacks, fill_stacks, fill_npy
     from .prism import build_stacks
     from .stations import get_stations, identify_station_cells
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    get_stations(manifest, output_dir)
+    stations_csv = get_stations(manifest, output_dir)
 
     # build stacks
     outputs = build_stacks(manifest, output_dir=output_dir)
@@ -217,7 +224,8 @@ def train_swe(
     model_format=None,
     model_filename=None,
 ):
-    """SWE-only ConvLSTM: previous N-1 days of SWE predict day N.
+    """
+    SWE-only ConvLSTM: previous N-1 days of SWE predict day N.
 
     Forklift of ConvLSTM_SWE_only.py. NS is reported against the 75 in-situ
     stations from the original California study.
@@ -482,7 +490,8 @@ def train_swe_pcp(
     model_format=None,
     model_filename=None,
 ):
-    """SWE + PCP variant. Forklift of ConvLSTM_SWE_PCP.py.
+    """
+    SWE + PCP variant. Forklift of ConvLSTM_SWE_PCP.py.
 
     Writes Actual_swe_pcp.npy, model_output_swe_pcp.npy and
     NS_stations_swe_pcp.csv into ``output_dir``.
@@ -711,7 +720,8 @@ def train_swe_tmp(
     model_format=None,
     model_filename=None,
 ):
-    """SWE + TMP variant. Forklift of ConvLSTM_SWE_TEMP.py.
+    """
+    SWE + TMP variant. Forklift of ConvLSTM_SWE_TEMP.py.
 
     Writes Actual_swe_tmp.npy, model_output_swe_tmp.npy and
     NS_stations_swe_tmp.csv into ``output_dir``.
@@ -900,7 +910,8 @@ def train_swe_tmp_pcp(
     model_format=None,
     model_filename=None,
 ):
-    """SWE + TMP + PCP variant. Forklift of ConvLSTM_SWE_TEMP_PCP.py.
+    """
+    SWE + TMP + PCP variant. Forklift of ConvLSTM_SWE_TEMP_PCP.py.
 
     Writes Actual_swe_tmp_pcp.npy, model_output_swe_tmp_pcp.npy and
     NS_stations_swe_tmp_pcp.csv into ``output_dir``.
@@ -1090,7 +1101,8 @@ def train_tmp_pcp(
     model_format=None,
     model_filename=None,
 ):
-    """TMP + PCP only (no SWE inputs). Forklift of ConvLSTM_TEMP_PCP.py.
+    """
+    TMP + PCP only (no SWE inputs). Forklift of ConvLSTM_TEMP_PCP.py.
 
     SWE still has to be loaded since it provides the y target, but the
     input tensor is sliced to channels 1:3 before fitting.
@@ -1263,7 +1275,8 @@ def train_tmp_pcp(
 
 
 def optimize_hyper_parameters(swe_filled, output_dir, *, manifest=None, n_trials=None):
-    """Optuna sweep over the SWE-only ConvLSTM.
+    """
+    Optuna sweep over the SWE-only ConvLSTM.
 
     Forklift of optimization_hyper_parameters.py. The search space is kept
     deliberately small so trials fit on a single GPU; the Keras session is
