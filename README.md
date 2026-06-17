@@ -5,28 +5,32 @@
 
 <!-- vim-markdown-toc GFM -->
 
-* [Micromamba Environment Setup](#micromamba-environment-setup)
+* [Micromamba environment](#micromamba-environment)
   * [PyPI TensorFlow](#pypi-tensorflow)
+    * [First-time setup](#first-time-setup)
+    * [Using an existing micromamba environment](#using-an-existing-micromamba-environment)
   * [Micromamba TensorFlow (not working)](#micromamba-tensorflow-not-working)
 * [Installation](#installation)
 * [Authentication](#authentication)
-* [Quick Start](#quick-start)
-* [Core Concepts](#core-concepts)
+* [Quick start](#quick-start)
+* [Core concepts](#core-concepts)
   * [Manifest](#manifest)
-* [Main Functions](#main-functions)
+* [Main functions](#main-functions)
   * [`build_stacks(manifest, output_dir)`](#build_stacksmanifest-output_dir)
   * [`build_swe_stacks(manifest, output_dir)`](#build_swe_stacksmanifest-output_dir)
   * [`fill_stacks(stacks)`](#fill_stacksstacks)
   * [`fetch_stations(...)`](#fetch_stations)
   * [`stations_to_csv(...)`](#stations_to_csv)
 * [Output](#output)
-* [Development Notes](#development-notes)
+* [Development notes](#development-notes)
 
 <!-- vim-markdown-toc -->
 
-## Micromamba Environment Setup
+## Micromamba environment
 
 ### PyPI TensorFlow
+
+#### First-time setup
 
 ```bash
 # install micromamba
@@ -84,6 +88,21 @@ python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU')
 mkdir -p runs/example
 cd runs/example
 python ../../swecast/example.py
+
+mm deactivate
+```
+
+#### Using an existing micromamba environment
+
+```bash
+cd ~/work/projects/swecast
+mm activate ./env
+
+mkdir -p runs/example
+cd runs/example
+python ../../swecast/example.py
+
+mm deactivate
 ```
 
 ### Micromamba TensorFlow (not working)
@@ -141,7 +160,7 @@ export EARTHDATA_PASSWORD='your_earthdata_password'
 
 Without these, data downloads will fail.
 
-## Quick Start
+## Quick start
 
 ```python
 import swecast
@@ -165,7 +184,7 @@ swe_outputs = build_swe_stacks(manifest, output_dir="./output")
 fill_stacks(swe_outputs)
 ```
 
-## Core Concepts
+## Core concepts
 
 ### Manifest
 
@@ -174,7 +193,7 @@ The `Manifest` object defines the scope of your data processing job:
 * **start / end**: Date range for the dataset
 * **bbox**: Geographic bounding box `(min_lon, min_lat, max_lon, max_lat)`
 
-## Main Functions
+## Main functions
 
 ### `build_stacks(manifest, output_dir)`
 
@@ -200,7 +219,7 @@ Exports station data to CSV format.
 
 All outputs are written to the specified `output_dir`. The structure and formats may change as the project evolves.
 
-## Development Notes
+## Development notes
 
 * This project is **actively under development**
 * Interfaces are **not yet stable**
