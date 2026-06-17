@@ -1375,7 +1375,7 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
         model = keras.models.Model(x_in, x)
         model.compile(
             optimizer=keras.optimizers.Adam(learning_rate=lr),
-            loss="binary_crossentropy",
+            loss=keras.losses.binary_crossentropy,
         )
         return model
 
