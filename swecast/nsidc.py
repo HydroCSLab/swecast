@@ -101,11 +101,17 @@ def _nc_bbox_indices(nc_path, bbox):
     # bbox has edges
     minx, miny, maxx, maxy = bbox
 
-    lat_edge0 = lat_arr[0] - dy / 2
     lon_edge0 = lon_arr[0] - dx / 2
 
-    lat_lo = int(max(0, math.floor((miny - lat_edge0) / dy)))
-    lat_hi = int(min(len(lat_arr), math.ceil((maxy - lat_edge0) / dy)))
+    if lat_arr[0] < lat_arr[-1]:  # increasing (south-to-north)
+        lat_edge0 = lat_arr[0] - dy / 2
+        lat_lo = int(max(0, math.floor((miny - lat_edge0) / dy)))
+        lat_hi = int(min(len(lat_arr), math.ceil((maxy - lat_edge0) / dy)))
+    else:  # decreasing (north-to-south)
+        lat_edge0 = lat_arr[0] + dy / 2
+        lat_lo = int(max(0, math.floor((lat_edge0 - maxy) / dy)))
+        lat_hi = int(min(len(lat_arr), math.ceil((lat_edge0 - miny) / dy)))
+
     lon_lo = int(max(0, math.floor((minx - lon_edge0) / dx)))
     lon_hi = int(min(len(lon_arr), math.ceil((maxx - lon_edge0) / dx)))
     return lat_lo, lat_hi, lon_lo, lon_hi
