@@ -14,6 +14,7 @@ import rasterio
 from rasterio.mask import mask
 from shapely.geometry import box
 import requests
+import math
 
 PRISM_BASE = (
     "https://services.nacse.org/prism/data/get/us/4km/{variable}/{date}?format=bil"
