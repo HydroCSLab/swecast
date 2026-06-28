@@ -61,16 +61,33 @@ def _prism_bbox_indices(bil, bbox):
     constants in Extract_PCP.py.
     """
     meta = _read_bil_hdr(bil)
+    # centroids
     ulxmap = float(meta["ULXMAP"])
     ulymap = float(meta["ULYMAP"])
     xdim = float(meta["XDIM"])
     ydim = float(meta["YDIM"])
 
+    # data edges
+    west_edge0 = ulxmap - xdim / 2
+    north_edge0 = ulymap + ydim / 2
+
+    # bbox edges
     minx, miny, maxx, maxy = bbox
-    h_grid = int(round((minx - ulxmap) / xdim))
-    v_grid = int(round((ulymap - miny) / ydim))
-    width = int(round((maxx - minx) / xdim))
-    height = int(round((maxy - miny) / ydim))
+
+    col_west = int(math.floor((minx - west_edge0) / xdim))
+    col_east_excl = int(math.ceil((maxx - west_edge0) / xdim))
+
+    row_north = int(math.floor((north_edge0 - maxy) / ydim))
+    row_south_excl = int(math.ceil((north_edge0 - miny) / ydim))
+
+    width = col_east_excl - col_west
+    height = row_south_excl - row_north
+
+    h_grid = col_west
+    # row_south_excl > row_north and loop starts from v_grid (e.g., v_grid - j
+    # for j=0...height-1); since row_south_excl is ceiled to one cell outside,
+    # v_grid needs to be row_south_excl - 1
+    v_grid = row_south_excl - 1
     return h_grid, v_grid, width, height
 
 
