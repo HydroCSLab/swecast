@@ -25,6 +25,7 @@ from .prism import Manifest, _date_range, _date_range_no_leap, _resolve
 from .preflight import preflight_nsidc
 from rasterio.transform import from_bounds
 from scipy.ndimage import convolve
+import math
 
 _EARTHDATA_AUTH_HOST = (
     "urs.earthdata.nasa.gov"  # Thish might be a config option in the future.
@@ -89,23 +90,24 @@ def _nc_bbox_indices(nc_path, bbox):
     hardcoded slice in Extract_SWE.py.
     """
     ds = ncdataset(str(nc_path))
+    # lat_arr and lon_arr are centroids
     lat_arr = np.asarray(ds.variables["lat"][:])
     lon_arr = np.asarray(ds.variables["lon"][:])
     ds.close()
 
-    minx, miny, maxx, maxy = bbox
     dy = float(np.abs(lat_arr[1] - lat_arr[0]))
     dx = float(np.abs(lon_arr[1] - lon_arr[0]))
-    height = int(round((maxy - miny) / dy))
-    width = int(round((maxx - minx) / dx))
 
-    if lat_arr[0] < lat_arr[-1]:  # increasing (south-to-north)
-        lat_lo = int(np.searchsorted(lat_arr, miny))
-    else:  # decreasing (north-to-south)
-        lat_lo = int(np.searchsorted(-lat_arr, -maxy))
-    lon_lo = int(np.searchsorted(lon_arr, minx))
-    lat_hi = lat_lo + height
-    lon_hi = lon_lo + width
+    # bbox has edges
+    minx, miny, maxx, maxy = bbox
+
+    lat_edge0 = lat_arr[0] - dy / 2
+    lon_edge0 = lon_arr[0] - dx / 2
+
+    lat_lo = int(max(0, math.floor((miny - lat_edge0) / dy)))
+    lat_hi = int(min(len(lat_arr), math.ceil((maxy - lat_edge0) / dy)))
+    lon_lo = int(max(0, math.floor((minx - lon_edge0) / dx)))
+    lon_hi = int(min(len(lon_arr), math.ceil((maxx - lon_edge0) / dx)))
     return lat_lo, lat_hi, lon_lo, lon_hi
 
 

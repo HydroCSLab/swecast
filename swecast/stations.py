@@ -154,7 +154,6 @@ def identify_station_cells(
                     lonlat[i, 1] = j
                     break
             elif lon[j + 1] - stations[i, 2] == 0:
-                # XXX: why not just j?
                 lonlat[i, 1] = j + 1
                 break
 
@@ -165,8 +164,8 @@ def identify_station_cells(
                     break
                 else:
                     lonlat[i, 0] = j
+                    break
             elif lat[j + 1] - stations[i, 1] == 0:
-                # XXX: why not just j?
                 lonlat[i, 0] = j + 1
                 break
 
