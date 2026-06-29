@@ -50,8 +50,8 @@ cd ~/work/projects/swecast
 git clone git@github.com:hydrocslab/swecast.git
 
 # the latest tensorflow supports python 3.13
-mm create -p ./env -y python=3.13
-mm activate ./env
+mm create -n swecast -y python=3.13
+mm activate swecast
 
 # add cuda lib paths to LD_LIBRARY_PATH automatically when activating the
 # environment
@@ -95,7 +95,7 @@ mm deactivate
 
 ```bash
 cd ~/work/projects/swecast
-mm activate ./env
+mm activate swecast
 
 mkdir -p runs/example
 cd runs/example
@@ -125,8 +125,8 @@ git clone git@github.com:hydrocslab/swecast.git
 
 # install Python through tensorflow because tensorflow is usually a couple
 # versions behind Python in conda-forge
-mm create -p ./env -y tensorflow rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
-mm activate ./env
+mm create -n swecast -y tensorflow rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
+mm activate swecast
 
 # executable stack needed to be cleared on Slackware
 patchelf --clear-execstack $CONDA_PREFIX/lib/libtensorflow_cc.so.2
