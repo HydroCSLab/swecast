@@ -1,4 +1,4 @@
-# SWECast (Snow Water Equivalent Forecasting)
+# SWECAST (Snow Water Equivalent Forecasting)
 
 > **Development Status**
 > This is an early-stage development module and is **not yet functional**. APIs, behavior, and outputs will change.
