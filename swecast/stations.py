@@ -177,8 +177,8 @@ def identify_station_cells(
     # clip the NC region to our study area
     for i in range(0, num_unique_lonlats):
         # (corner_lat, corner_lon) is one corner of our study area, derived from manifest.bbox
-        latlon[i, 0] = lonlat[i, 0] - corner_lat
-        latlon[i, 1] = lonlat[i, 1] - corner_lon
+        latlon[i, 0] = unique_lonlat[i, 0] - corner_lat
+        latlon[i, 1] = unique_lonlat[i, 1] - corner_lon
 
     # save the station data
     np.save(output_path, latlon)
