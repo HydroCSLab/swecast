@@ -106,9 +106,6 @@ def predict(
     variant="swe",
     cache_dir=None,
     num_days_train=None,
-    swe_scaling_factor=None,
-    pcp_scaling_factor=None,
-    tmp_scaling_range=None,
     earthdata_username=None,
     earthdata_password=None,
 ):
@@ -161,9 +158,6 @@ def predict(
     cache_dir = Path(cache_dir) if cache_dir else Path("./.cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", None)
-    pcp_scaling_factor = _resolve(pcp_scaling_factor, manifest, "pcp_scaling_factor", None)
-    tmp_scaling_range = _resolve(tmp_scaling_range, manifest, "tmp_scaling_range", None)
 
     seq_len = num_days_train - 1  # number of input frames (e.g. 4 for default)
     input_dates = [target_date - timedelta(days=seq_len - i) for i in range(seq_len)]
@@ -236,13 +230,13 @@ def predict(
             idx = channels.index("SWE")
             x_channel = x[..., idx]
 
-            if scaling_factor is None:
-                if metadata is None:
-                    scaling_factor = float(np.max(np.log10(1 + x_channel)))
-                    if scaling_factor == 0:
-                        scaling_factor = 1.0
-                else:
-                    scaling_factor = metadata[channel.lower()]["scaling_factor"]
+            if metadata is None:
+                # XXX: this is bad because we lost the original scaling factors
+                scaling_factor = np.max(np.log10(1 + x_channel))
+                if scaling_factor == 0:
+                    scaling_factor = 1.0
+            else:
+                scaling_factor = metadata[channel.lower()]["scaling_factor"]
 
             x[..., idx] = np.log10(1 + x_channel) / scaling_factor
 
@@ -255,16 +249,14 @@ def predict(
         idx = channels.index("TMP")
         x_channel = x[..., idx]
 
-        if tmp_scaling_range is None:
-            if metadata is None:
-                tmp_min = float(np.min(x_channel))
-                tmp_max = float(np.max(x_channel))
-            else:
-                tmp_min = metadata["tmp"]["scaling_min"]
-                tmp_max = metadata["tmp"]["scaling_max"]
-            tmp_scaling_range = (tmp_min, tmp_max)
+        if metadata is None:
+            # XXX: this is bad because we lost the original scaling factors
+            tmp_min = np.min(x_channel)
+            tmp_max = np.max(x_channel)
         else:
-            tmp_min, tmp_max = tmp_scaling_range
+            tmp_min = metadata["tmp"]["scaling_min"]
+            tmp_max = metadata["tmp"]["scaling_max"]
+        tmp_scaling_range = (tmp_min, tmp_max)
 
         x[..., idx] = (x_channel - tmp_min) / (tmp_max - tmp_min)
 

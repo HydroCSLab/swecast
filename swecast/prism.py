@@ -118,9 +118,6 @@ class Manifest:
         num_data_used     : how many leading days from the .npy stack to use
         epochs, batch_size: keras.fit args
         train_split       : train/val split ratio (0.8)
-        swe_scaling_factor: SWE scaling factor
-        pcp_scaling_factor: precipitation scaling factor
-        tmp_scaling_range : temperature scaling range (tmp_min, tmp_max)
         early_stopping_patience, reduce_lr_patience : callback patience values
         num_stations      : number of stations in the per-station NS loop (75)
 
@@ -147,9 +144,6 @@ class Manifest:
     epochs: int = 50
     batch_size: int = 16
     train_split: float = 0.8
-    swe_scaling_factor: float | None = None
-    pcp_scaling_factor: float | None = None
-    tmp_scaling_range: tuple[float, float] | None = None
     early_stopping_patience: int = 10
     reduce_lr_patience: int = 5
     num_stations: int = 75

@@ -241,7 +241,6 @@ def train_swe(
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -273,7 +272,6 @@ def train_swe(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", None)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -303,10 +301,9 @@ def train_swe(
     val_dataset = dataset[val_index]
 
     # Normalize the data to the 0-1 range.The study used log normalization
-    if swe_scaling_factor is None:
-        swe_scaling_factor = float(np.max(np.log10(1 + train_dataset)))
-        if swe_scaling_factor == 0:
-            swe_scaling_factor = 1.0
+    swe_scaling_factor = np.max(np.log10(1 + train_dataset))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
 
     train_dataset = (
         np.log10(1 + train_dataset) / swe_scaling_factor
@@ -512,8 +509,6 @@ def train_swe_pcp(
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
-    pcp_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -539,8 +534,6 @@ def train_swe_pcp(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", None)
-    pcp_scaling_factor = _resolve(pcp_scaling_factor, manifest, "pcp_scaling_factor", None)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -559,16 +552,14 @@ def train_swe_pcp(
     ds1_pcp = ds_pcp[0:num_data_used, :, :]
     ds1_swe, ds1_pcp = _align_shapes(ds1_swe, ds1_pcp)
 
-    if swe_scaling_factor is None:
-        swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
-        if swe_scaling_factor == 0:
-            swe_scaling_factor = 1.0
+    swe_scaling_factor = np.max(np.log10(1 + ds1_swe))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
-    if pcp_scaling_factor is None:
-        pcp_scaling_factor = float(np.max(np.log10(1 + ds1_pcp)))
-        if pcp_scaling_factor == 0:
-            pcp_scaling_factor = 1.0
+    pcp_scaling_factor = np.max(np.log10(1 + ds1_pcp))
+    if pcp_scaling_factor == 0:
+        pcp_scaling_factor = 1.0
     ds1_pcp = np.log10(1 + ds1_pcp) / pcp_scaling_factor
 
     ds1 = np.stack((ds1_swe, ds1_pcp), axis=3)
@@ -756,8 +747,6 @@ def train_swe_tmp(
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
-    tmp_scaling_range=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -779,8 +768,6 @@ def train_swe_tmp(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", None)
-    tmp_scaling_range = _resolve(tmp_scaling_range, manifest, "tmp_scaling_range", None)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -798,18 +785,14 @@ def train_swe_tmp(
     ds1_tmp = ds_tmp[0:num_data_used, :, :]
     ds1_swe, ds1_tmp = _align_shapes(ds1_swe, ds1_tmp)
 
-    if swe_scaling_factor is None:
-        swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
-        if swe_scaling_factor == 0:
-            swe_scaling_factor = 1.0
+    swe_scaling_factor = np.max(np.log10(1 + ds1_swe))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
-    if tmp_scaling_range is None:
-        tmp_min = float(np.min(ds1_tmp))
-        tmp_max = float(np.max(ds1_tmp))
-        tmp_scaling_range = (tmp_min, tmp_max)
-    else:
-        tmp_min, tmp_max = tmp_scaling_range
+    tmp_min = np.min(ds1_tmp)
+    tmp_max = np.max(ds1_tmp)
+    tmp_scaling_range = (tmp_min, tmp_max)
     ds1_tmp = (ds1_tmp - tmp_min) / (tmp_max - tmp_min)
 
     ds1 = np.stack((ds1_swe, ds1_tmp), axis=3)
@@ -962,9 +945,6 @@ def train_swe_tmp_pcp(
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
-    pcp_scaling_factor=None,
-    tmp_scaling_range=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -986,9 +966,6 @@ def train_swe_tmp_pcp(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", None)
-    pcp_scaling_factor = _resolve(pcp_scaling_factor, manifest, "pcp_scaling_factor", None)
-    tmp_scaling_range = _resolve(tmp_scaling_range, manifest, "tmp_scaling_range", None)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -1008,24 +985,19 @@ def train_swe_tmp_pcp(
     ds1_pcp = ds_pcp[0:num_data_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
 
-    if swe_scaling_factor is None:
-        swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
-        if swe_scaling_factor == 0:
-            swe_scaling_factor = 1.0
+    swe_scaling_factor = np.max(np.log10(1 + ds1_swe))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
-    if pcp_scaling_factor is None:
-        pcp_scaling_factor = float(np.max(np.log10(1 + ds1_pcp)))
-        if pcp_scaling_factor == 0:
-            pcp_scaling_factor = 1.0
+    pcp_scaling_factor = np.max(np.log10(1 + ds1_pcp))
+    if pcp_scaling_factor == 0:
+        pcp_scaling_factor = 1.0
     ds1_pcp = np.log10(1 + ds1_pcp) / pcp_scaling_factor
 
-    if tmp_scaling_range is None:
-        tmp_min = float(np.min(ds1_tmp))
-        tmp_max = float(np.max(ds1_tmp))
-        tmp_scaling_range = (tmp_min, tmp_max)
-    else:
-        tmp_min, tmp_max = tmp_scaling_range
+    tmp_min = np.min(ds1_tmp)
+    tmp_max = np.max(ds1_tmp)
+    tmp_scaling_range = (tmp_min, tmp_max)
     ds1_tmp = (ds1_tmp - tmp_min) / (tmp_max - tmp_min)
 
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
@@ -1177,9 +1149,6 @@ def train_tmp_pcp(
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
-    pcp_scaling_factor=None,
-    tmp_scaling_range=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -1204,9 +1173,6 @@ def train_tmp_pcp(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", None)
-    pcp_scaling_factor = _resolve(pcp_scaling_factor, manifest, "pcp_scaling_factor", None)
-    tmp_scaling_range = _resolve(tmp_scaling_range, manifest, "tmp_scaling_range", None)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -1226,24 +1192,19 @@ def train_tmp_pcp(
     ds1_pcp = ds_pcp[0:num_data_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
 
-    if swe_scaling_factor is None:
-        swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
-        if swe_scaling_factor == 0:
-            swe_scaling_factor = 1.0
+    swe_scaling_factor = np.max(np.log10(1 + ds1_swe))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
-    if pcp_scaling_factor is None:
-        pcp_scaling_factor = float(np.max(np.log10(1 + ds1_pcp)))
-        if pcp_scaling_factor == 0:
-            pcp_scaling_factor = 1.0
+    pcp_scaling_factor = np.max(np.log10(1 + ds1_pcp))
+    if pcp_scaling_factor == 0:
+        pcp_scaling_factor = 1.0
     ds1_pcp = np.log10(1 + ds1_pcp) / pcp_scaling_factor
 
-    if tmp_scaling_range is None:
-        tmp_min = float(np.min(ds1_tmp))
-        tmp_max = float(np.max(ds1_tmp))
-        tmp_scaling_range = (tmp_min, tmp_max)
-    else:
-        tmp_min, tmp_max = tmp_scaling_range
+    tmp_min = np.min(ds1_tmp)
+    tmp_max = np.max(ds1_tmp)
+    tmp_scaling_range = (tmp_min, tmp_max)
     ds1_tmp = (ds1_tmp - tmp_min) / (tmp_max - tmp_min)
 
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
