@@ -19,7 +19,7 @@ from keras.models import Model
 from keras.layers import Input
 from .prism import _resolve
 
-import tomll_w
+import tomli_w
 
 
 @dataclass
