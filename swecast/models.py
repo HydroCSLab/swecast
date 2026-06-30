@@ -797,7 +797,6 @@ def train_swe_tmp(
     ds1_swe = ds_swe[0:num_data_used, :, :]
     ds1_tmp = ds_tmp[0:num_data_used, :, :]
     ds1_swe, ds1_tmp = _align_shapes(ds1_swe, ds1_tmp)
-    ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
     if swe_scaling_factor is None:
         swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
