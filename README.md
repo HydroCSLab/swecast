@@ -77,7 +77,7 @@ cat > $CONDA_PREFIX/etc/conda/deactivate.d/tensorflow-cuda.sh <<'EOF'
 export LD_LIBRARY_PATH="$_OLD_LD_LIBRARY_PATH"
 EOF
 
-pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
+pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotlib rioxarray tomli_w
 
 . $CONDA_PREFIX/etc/conda/activate.d/tensorflow-cuda.sh
 
