@@ -104,7 +104,7 @@ def predict(
     variant="swe",
     cache_dir=None,
     num_days_train=None,
-    log_norm_divisor=None,
+    swe_scaling_factor=None,
     earthdata_username=None,
     earthdata_password=None,
 ):
@@ -123,7 +123,7 @@ def predict(
         immediately before it as input.
     manifest : Manifest
         Supplies bbox and (via ``_resolve``) defaults for cache_dir,
-        num_days_train, and log_norm_divisor.
+        num_days_train, and swe_scaling_factor.
     variant : str
         One of "swe", "swe_pcp", "swe_tmp", "swe_tmp_pcp",
         "tmp_pcp". Has to match the channel layout the model was
@@ -157,7 +157,7 @@ def predict(
     cache_dir = Path(cache_dir) if cache_dir else Path("./.cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    log_norm_divisor = _resolve(log_norm_divisor, manifest, "log_norm_divisor", 3.5)
+    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
 
     seq_len = num_days_train - 1  # number of input frames (e.g. 4 for default)
     input_dates = [target_date - timedelta(days=seq_len - i) for i in range(seq_len)]
@@ -211,11 +211,11 @@ def predict(
     for ch_idx in range(x.shape[-1]):
         x[..., ch_idx] = filled_data(x[..., ch_idx])
 
-    # Replicate training normalization: log10(1 + x) / log_norm_divisor on SWE.
+    # Replicate training normalization: log10(1 + x) / swe_scaling_factor on SWE.
     # PCP/TMP are fed raw (matching ConvLSTM_SWE_PCP / TMP / TMP_PCP scripts).
     if "SWE" in channels:
         swe_idx = channels.index("SWE")
-        x[..., swe_idx] = np.log10(1 + x[..., swe_idx]) / log_norm_divisor
+        x[..., swe_idx] = np.log10(1 + x[..., swe_idx]) / swe_scaling_factor
 
     # Add batch dim
     x_input = x[np.newaxis, ...].astype(np.float32)
@@ -227,9 +227,9 @@ def predict(
     y_pred_norm = model.predict(x_input, verbose=0)
     y_pred_norm = np.squeeze(y_pred_norm)  # (H, W)
 
-    # Inverse of log10(1 + y) / log_norm_divisor; clamp negatives to 0 to match
+    # Inverse of log10(1 + y) / swe_scaling_factor; clamp negatives to 0 to match
     # the per-station postprocessing in the original ConvLSTM scripts.
-    predicted = 10 ** (y_pred_norm * log_norm_divisor) - 1
+    predicted = 10 ** (y_pred_norm * swe_scaling_factor) - 1
     predicted = np.where(predicted < 0, 0, predicted)
 
     # Actual SWE for target_date (raw + gap-filled, the latter being apples-to-

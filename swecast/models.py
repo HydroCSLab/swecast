@@ -217,7 +217,7 @@ def train_swe(
     epochs=None,
     batch_size=None,
     train_split=None,
-    log_norm_divisor=None,
+    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -249,7 +249,7 @@ def train_swe(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    log_norm_divisor = _resolve(log_norm_divisor, manifest, "log_norm_divisor", 3.5)
+    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -280,9 +280,9 @@ def train_swe(
 
     # Normalize the data to the 0-1 range.The study used log normalization
     train_dataset = (
-        np.log10(1 + train_dataset) / log_norm_divisor
+        np.log10(1 + train_dataset) / swe_scaling_factor
     )  # +1 ensures that zero values do not cause issue and /3.5 scales values to approximately 0-1
-    val_dataset = np.log10(1 + val_dataset) / log_norm_divisor
+    val_dataset = np.log10(1 + val_dataset) / swe_scaling_factor
 
     # prepare for x and y for the model.`x` is frames 0 to n - 1, and `y` is frames n-1 to n.
     # For example, if data from 5 days were used, days 1 to 4 would be used as input features, and day 5 would be used as the target data.
@@ -411,7 +411,7 @@ def train_swe(
     y_val1 = np.squeeze(y_val)
     np.save(
         os.path.join(output_dir, "Actual_swe.npy"),
-        (10 ** (y_val1 * log_norm_divisor) - 1),
+        (10 ** (y_val1 * swe_scaling_factor) - 1),
     )  # yvalue use for model develop save to plot and visualize contrast with predicted
     for j in range(0, num_stations):
         station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
@@ -423,7 +423,7 @@ def train_swe(
     y_val_prediction1 = np.squeeze(y_val_prediction)
     np.save(
         os.path.join(output_dir, "model_output_swe.npy"),
-        (10 ** (y_val_prediction1 * log_norm_divisor) - 1),
+        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
     )  # yvalue predicted
     for j in range(0, num_stations):
         station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
@@ -457,9 +457,9 @@ def train_swe(
 
     # station_swe_predict1 = np.exp2(np.log2(10) * 3.5 * station_swe_predict) - 1
 
-    station_swe_origin1 = 10 ** (log_norm_divisor * station_swe_origin) - 1
+    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
 
-    station_swe_predict1 = 10 ** (log_norm_divisor * station_swe_predict) - 1
+    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
 
     variances = np.var(station_swe_origin1, axis=1)
     mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
@@ -483,7 +483,7 @@ def train_swe_pcp(
     epochs=None,
     batch_size=None,
     train_split=None,
-    log_norm_divisor=None,
+    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -509,7 +509,7 @@ def train_swe_pcp(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    log_norm_divisor = _resolve(log_norm_divisor, manifest, "log_norm_divisor", 3.5)
+    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -527,7 +527,7 @@ def train_swe_pcp(
     ds1_swe = ds_swe[0:num_data_used, :, :]
     ds1_pcp = ds_pcp[0:num_data_used, :, :]
     ds1_swe, ds1_pcp = _align_shapes(ds1_swe, ds1_pcp)
-    ds1_swe = np.log10(1 + ds1_swe) / log_norm_divisor
+    ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
     ds1 = np.stack((ds1_swe, ds1_pcp), axis=3)
 
     # prepare for model input
@@ -656,7 +656,7 @@ def train_swe_pcp(
     y_val1 = np.squeeze(y_val)
     np.save(
         os.path.join(output_dir, "Actual_swe_pcp.npy"),
-        (10 ** (y_val1 * log_norm_divisor) - 1),
+        (10 ** (y_val1 * swe_scaling_factor) - 1),
     )  # yvalue use for model develop save to plot and visualize contrast with predicted
     for j in range(0, num_stations):
         station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
@@ -668,7 +668,7 @@ def train_swe_pcp(
     y_val_prediction1 = np.squeeze(y_val_prediction)
     np.save(
         os.path.join(output_dir, "model_output_swe_pcp.npy"),
-        (10 ** (y_val_prediction1 * log_norm_divisor) - 1),
+        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
     )  # yvalue predicted
     for j in range(0, num_stations):
         station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
@@ -686,8 +686,8 @@ def train_swe_pcp(
 
     # recover the SWE data to original scales, calculate NS for 75 stations
 
-    station_swe_origin1 = 10 ** (log_norm_divisor * station_swe_origin) - 1
-    station_swe_predict1 = 10 ** (log_norm_divisor * station_swe_predict) - 1
+    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
+    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
 
     variances = np.var(station_swe_origin1, axis=1)
     mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
@@ -713,7 +713,7 @@ def train_swe_tmp(
     epochs=None,
     batch_size=None,
     train_split=None,
-    log_norm_divisor=None,
+    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -735,7 +735,7 @@ def train_swe_tmp(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    log_norm_divisor = _resolve(log_norm_divisor, manifest, "log_norm_divisor", 3.5)
+    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -752,7 +752,7 @@ def train_swe_tmp(
     ds1_swe = ds_swe[0:num_data_used, :, :]
     ds1_tmp = ds_tmp[0:num_data_used, :, :]
     ds1_swe, ds1_tmp = _align_shapes(ds1_swe, ds1_tmp)
-    ds1_swe = np.log10(1 + ds1_swe) / log_norm_divisor
+    ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
     ds1 = np.stack((ds1_swe, ds1_tmp), axis=3)
 
     # prepare for model input
@@ -849,7 +849,7 @@ def train_swe_tmp(
     y_val1 = np.squeeze(y_val)
     np.save(
         os.path.join(output_dir, "Actual_swe_tmp.npy"),
-        (10 ** (y_val1 * log_norm_divisor) - 1),
+        (10 ** (y_val1 * swe_scaling_factor) - 1),
     )
     for j in range(0, num_stations):
         station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
@@ -860,7 +860,7 @@ def train_swe_tmp(
     y_val_prediction1 = np.squeeze(y_val_prediction)
     np.save(
         os.path.join(output_dir, "model_output_swe_tmp.npy"),
-        (10 ** (y_val_prediction1 * log_norm_divisor) - 1),
+        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
     )
     for j in range(0, num_stations):
         station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
@@ -875,8 +875,8 @@ def train_swe_tmp(
     mse = ((station_swe_origin - station_swe_predict) ** 2).mean(axis=1)
     NS_stations = 1 - mse / variances
 
-    station_swe_origin1 = 10 ** (log_norm_divisor * station_swe_origin) - 1
-    station_swe_predict1 = 10 ** (log_norm_divisor * station_swe_predict) - 1
+    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
+    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
 
     variances = np.var(station_swe_origin1, axis=1)
     mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
@@ -903,7 +903,7 @@ def train_swe_tmp_pcp(
     epochs=None,
     batch_size=None,
     train_split=None,
-    log_norm_divisor=None,
+    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -925,7 +925,7 @@ def train_swe_tmp_pcp(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    log_norm_divisor = _resolve(log_norm_divisor, manifest, "log_norm_divisor", 3.5)
+    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -944,7 +944,7 @@ def train_swe_tmp_pcp(
     ds1_tmp = ds_tmp[0:num_data_used, :, :]
     ds1_pcp = ds_pcp[0:num_data_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
-    ds1_swe = np.log10(1 + ds1_swe) / log_norm_divisor
+    ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
 
     dataset = []
@@ -1038,7 +1038,7 @@ def train_swe_tmp_pcp(
     y_val1 = np.squeeze(y_val)
     np.save(
         os.path.join(output_dir, "Actual_swe_tmp_pcp.npy"),
-        (10 ** (y_val1 * log_norm_divisor) - 1),
+        (10 ** (y_val1 * swe_scaling_factor) - 1),
     )
     for j in range(0, num_stations):
         station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
@@ -1049,7 +1049,7 @@ def train_swe_tmp_pcp(
     y_val_prediction1 = np.squeeze(y_val_prediction)
     np.save(
         os.path.join(output_dir, "model_output_swe_tmp_pcp.npy"),
-        (10 ** (y_val_prediction1 * log_norm_divisor) - 1),
+        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
     )
     for j in range(0, num_stations):
         station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
@@ -1064,8 +1064,8 @@ def train_swe_tmp_pcp(
     mse = ((station_swe_origin - station_swe_predict) ** 2).mean(axis=1)
     NS_stations = 1 - mse / variances
 
-    station_swe_origin1 = 10 ** (log_norm_divisor * station_swe_origin) - 1
-    station_swe_predict1 = 10 ** (log_norm_divisor * station_swe_predict) - 1
+    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
+    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
 
     variances = np.var(station_swe_origin1, axis=1)
     mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
@@ -1094,7 +1094,7 @@ def train_tmp_pcp(
     epochs=None,
     batch_size=None,
     train_split=None,
-    log_norm_divisor=None,
+    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -1119,7 +1119,7 @@ def train_tmp_pcp(
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    log_norm_divisor = _resolve(log_norm_divisor, manifest, "log_norm_divisor", 3.5)
+    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -1138,7 +1138,7 @@ def train_tmp_pcp(
     ds1_tmp = ds_tmp[0:num_data_used, :, :]
     ds1_pcp = ds_pcp[0:num_data_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
-    ds1_swe = np.log10(1 + ds1_swe) / log_norm_divisor
+    ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
 
     dataset = []
@@ -1234,7 +1234,7 @@ def train_tmp_pcp(
     y_val1 = np.squeeze(y_val)
     np.save(
         os.path.join(output_dir, "Actual_tmp_pcp.npy"),
-        (10 ** (y_val1 * log_norm_divisor) - 1),
+        (10 ** (y_val1 * swe_scaling_factor) - 1),
     )
     for j in range(0, num_stations):
         station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
@@ -1245,7 +1245,7 @@ def train_tmp_pcp(
     y_val_prediction1 = np.squeeze(y_val_prediction)
     np.save(
         os.path.join(output_dir, "model_output_tmp_pcp.npy"),
-        (10 ** (y_val_prediction1 * log_norm_divisor) - 1),
+        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
     )
     for j in range(0, num_stations):
         station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
@@ -1260,8 +1260,8 @@ def train_tmp_pcp(
     mse = ((station_swe_origin - station_swe_predict) ** 2).mean(axis=1)
     NS_stations = 1 - mse / variances
 
-    station_swe_origin1 = 10 ** (log_norm_divisor * station_swe_origin) - 1
-    station_swe_predict1 = 10 ** (log_norm_divisor * station_swe_predict) - 1
+    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
+    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
 
     variances = np.var(station_swe_origin1, axis=1)
     mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
