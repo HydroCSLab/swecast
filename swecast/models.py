@@ -56,7 +56,7 @@ def _align_shapes(*arrays):
 
 def _save_model(
     model, output_dir, variant_default, save_model, model_format, model_filename,
-    swe_sacling_factor, pcp_scaling_factor, tmp_scaling_range
+    swe_scaling_factor, pcp_scaling_factor, tmp_scaling_range
 ):
     """
     Save ``model`` and return the path, or None if disabled.
