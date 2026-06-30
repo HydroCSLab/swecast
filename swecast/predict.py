@@ -30,6 +30,8 @@ from .nsidc import (
     filled_data,
 )
 
+import tomllib
+
 # Channel order per variant. Must match the order the model was trained with
 # (see train_swe_pcp / train_swe_tmp / train_swe_tmp_pcp / train_tmp_pcp
 # in models.py; they all stack as np.stack((swe, ...), axis=3) in this order).
@@ -105,6 +107,8 @@ def predict(
     cache_dir=None,
     num_days_train=None,
     swe_scaling_factor=None,
+    pcp_scaling_factor=None,
+    tmp_scaling_range=None,
     earthdata_username=None,
     earthdata_password=None,
 ):
@@ -157,7 +161,9 @@ def predict(
     cache_dir = Path(cache_dir) if cache_dir else Path("./.cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
+    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", None)
+    pcp_scaling_factor = _resolve(pcp_scaling_factor, manifest, "pcp_scaling_factor", None)
+    tmp_scaling_range = _resolve(tmp_scaling_range, manifest, "tmp_scaling_range", None)
 
     seq_len = num_days_train - 1  # number of input frames (e.g. 4 for default)
     input_dates = [target_date - timedelta(days=seq_len - i) for i in range(seq_len)]
@@ -211,11 +217,56 @@ def predict(
     for ch_idx in range(x.shape[-1]):
         x[..., ch_idx] = filled_data(x[..., ch_idx])
 
+    metadata_file = model_path.with_suffix(".toml")
+    if metadata_file.exists():
+        with open(metadata_file, "rb") as f:
+            metadata = tomllib.load(f)
+    else:
+        metadata = None
+
     # Replicate training normalization: log10(1 + x) / swe_scaling_factor on SWE.
     # PCP/TMP are fed raw (matching ConvLSTM_SWE_PCP / TMP / TMP_PCP scripts).
-    if "SWE" in channels:
-        swe_idx = channels.index("SWE")
-        x[..., swe_idx] = np.log10(1 + x[..., swe_idx]) / swe_scaling_factor
+    scaling_factors = {
+            "SWE": swe_scaling_factor,
+            "PCP": pcp_scaling_factor,
+    }
+
+    for channel, scaling_factor in scaling_factors.items():
+        if channel in channels:
+            idx = channels.index("SWE")
+            x_channel = x[..., idx]
+
+            if scaling_factor is None:
+                if metadata is None:
+                    scaling_factor = np.max(np.log10(1 + x_channel))
+                    if scaling_factor == 0:
+                        scaling_factor = 1.0
+                else:
+                    scaling_factor = metadata[channel.lower()]["scaling_factor"]
+
+            x[..., idx] = np.log10(1 + x_channel) / scaling_factor
+
+            scaling_factors[channel] = scaling_factor
+
+    swe_scaling_factor = scaling_factors["SWE"]
+    pcp_scaling_factor = scaling_factors["PCP"]
+
+    if "TMP" in channels:
+        idx = channels.index("TMP")
+        x_channel = x[..., idx]
+
+        if tmp_scaling_range is None:
+            if metadata is None:
+                tmp_min = np.min(x_channel)
+                tmp_max = np.max(x_channel)
+            else:
+                tmp_min = metadata["tmp"]["scaling_min"]
+                tmp_max = metadata["tmp"]["scaling_max"]
+            tmp_scaling_range = (tmp_min, tmp_max)
+        else:
+            tmp_min, tmp_max = tmp_scaling_range
+
+        x[..., idx] = (x_channel - tmp_min) / (tmp_max - tmp_min)
 
     # Add batch dim
     x_input = x[np.newaxis, ...].astype(np.float32)
