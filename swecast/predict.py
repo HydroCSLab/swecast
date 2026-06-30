@@ -238,7 +238,7 @@ def predict(
 
             if scaling_factor is None:
                 if metadata is None:
-                    scaling_factor = np.max(np.log10(1 + x_channel))
+                    scaling_factor = float(np.max(np.log10(1 + x_channel)))
                     if scaling_factor == 0:
                         scaling_factor = 1.0
                 else:
@@ -257,8 +257,8 @@ def predict(
 
         if tmp_scaling_range is None:
             if metadata is None:
-                tmp_min = np.min(x_channel)
-                tmp_max = np.max(x_channel)
+                tmp_min = float(np.min(x_channel))
+                tmp_max = float(np.max(x_channel))
             else:
                 tmp_min = metadata["tmp"]["scaling_min"]
                 tmp_max = metadata["tmp"]["scaling_max"]

@@ -304,7 +304,7 @@ def train_swe(
 
     # Normalize the data to the 0-1 range.The study used log normalization
     if swe_scaling_factor is None:
-        swe_scaling_factor = np.max(np.log10(1 + train_dataset))
+        swe_scaling_factor = float(np.max(np.log10(1 + train_dataset)))
         if swe_scaling_factor == 0:
             swe_scaling_factor = 1.0
 
@@ -560,13 +560,13 @@ def train_swe_pcp(
     ds1_swe, ds1_pcp = _align_shapes(ds1_swe, ds1_pcp)
 
     if swe_scaling_factor is None:
-        swe_scaling_factor = np.max(np.log10(1 + ds1_swe))
+        swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
         if swe_scaling_factor == 0:
             swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
     if pcp_scaling_factor is None:
-        pcp_scaling_factor = np.max(np.log10(1 + ds1_pcp))
+        pcp_scaling_factor = float(np.max(np.log10(1 + ds1_pcp)))
         if pcp_scaling_factor == 0:
             pcp_scaling_factor = 1.0
     ds1_pcp = np.log10(1 + ds1_pcp) / pcp_scaling_factor
@@ -800,14 +800,14 @@ def train_swe_tmp(
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
     if swe_scaling_factor is None:
-        swe_scaling_factor = np.max(np.log10(1 + ds1_swe))
+        swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
         if swe_scaling_factor == 0:
             swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
     if tmp_scaling_range is None:
-        tmp_min = np.min(ds1_tmp)
-        tmp_max = np.max(ds1_tmp)
+        tmp_min = float(np.min(ds1_tmp))
+        tmp_max = float(np.max(ds1_tmp))
         tmp_scaling_range = (tmp_min, tmp_max)
     else:
         tmp_min, tmp_max = tmp_scaling_range
@@ -1010,20 +1010,20 @@ def train_swe_tmp_pcp(
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
 
     if swe_scaling_factor is None:
-        swe_scaling_factor = np.max(np.log10(1 + ds1_swe))
+        swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
         if swe_scaling_factor == 0:
             swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
     if pcp_scaling_factor is None:
-        pcp_scaling_factor = np.max(np.log10(1 + ds1_pcp))
+        pcp_scaling_factor = float(np.max(np.log10(1 + ds1_pcp)))
         if pcp_scaling_factor == 0:
             pcp_scaling_factor = 1.0
     ds1_pcp = np.log10(1 + ds1_pcp) / pcp_scaling_factor
 
     if tmp_scaling_range is None:
-        tmp_min = np.min(ds1_tmp)
-        tmp_max = np.max(ds1_tmp)
+        tmp_min = float(np.min(ds1_tmp))
+        tmp_max = float(np.max(ds1_tmp))
         tmp_scaling_range = (tmp_min, tmp_max)
     else:
         tmp_min, tmp_max = tmp_scaling_range
@@ -1228,20 +1228,20 @@ def train_tmp_pcp(
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
 
     if swe_scaling_factor is None:
-        swe_scaling_factor = np.max(np.log10(1 + ds1_swe))
+        swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
         if swe_scaling_factor == 0:
             swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
 
     if pcp_scaling_factor is None:
-        pcp_scaling_factor = np.max(np.log10(1 + ds1_pcp))
+        pcp_scaling_factor = float(np.max(np.log10(1 + ds1_pcp)))
         if pcp_scaling_factor == 0:
             pcp_scaling_factor = 1.0
     ds1_pcp = np.log10(1 + ds1_pcp) / pcp_scaling_factor
 
     if tmp_scaling_range is None:
-        tmp_min = np.min(ds1_tmp)
-        tmp_max = np.max(ds1_tmp)
+        tmp_min = float(np.min(ds1_tmp))
+        tmp_max = float(np.max(ds1_tmp))
         tmp_scaling_range = (tmp_min, tmp_max)
     else:
         tmp_min, tmp_max = tmp_scaling_range
