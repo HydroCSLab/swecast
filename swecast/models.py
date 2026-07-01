@@ -547,7 +547,7 @@ def train_swe_pcp(
     # Cast to fp32 to halve windowed-dataset memory; Keras weights are fp32 anyway
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
-    ds_pcp = np.where(ds_pcp < 0 | np.isnan(ds_pcp), 0, ds_pcp)
+    ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
     ds1_swe = ds_swe[0:num_data_used, :, :]
     ds1_pcp = ds_pcp[0:num_data_used, :, :]
@@ -980,7 +980,7 @@ def train_swe_tmp_pcp(
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
-    ds_pcp = np.where(ds_pcp < 0 | np.isnan(ds_pcp), 0, ds_pcp)
+    ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
     ds1_swe = ds_swe[0:num_data_used, :, :]
     ds1_tmp = ds_tmp[0:num_data_used, :, :]
@@ -1188,7 +1188,7 @@ def train_tmp_pcp(
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
-    ds_pcp = np.where(ds_pcp < 0 | np.isnan(ds_pcp), 0, ds_pcp)
+    ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
     ds1_swe = ds_swe[0:num_data_used, :, :]
     ds1_tmp = ds_tmp[0:num_data_used, :, :]
