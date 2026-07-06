@@ -40,17 +40,17 @@ class _EarthdataSession(requests.Session):
     a browser.
     """
 
-    #hb: This sets up the web session when we first make one. It recieves a
-    #hb: username and password and stores them so every request we send later
-    #hb: will automatically log us in. No example output, it just saves the login.
+    #Context: This sets up the web session when we first make one. It recieves a
+    #Context: username and password and stores them so every request we send later
+    #Context: will automatically log us in. No example output, it just saves the login.
     def __init__(self, username: str, password: str):
         super().__init__()
         self.auth = (username, password)
 
-    #hb: When the website bounces us to a diffrent login page (a redirect), this
-    #hb: decides if we keep sending our password along. If we are going to the
-    #hb: Earthdata login host we keep it, otherwise we drop it for safety so we
-    #hb: dont leak our password to some other website by accident.
+    #Context: When the website bounces us to a diffrent login page (a redirect), this
+    #Context: decides if we keep sending our password along. If we are going to the
+    #Context: Earthdata login host we keep it, otherwise we drop it for safety so we
+    #Context: dont leak our password to some other website by accident.
     def rebuild_auth(self, prepared_request, response):
         # Only drop auth when redirecting away from both the origin and Earthdata hosts
         redirect_host = urlparse(prepared_request.url).hostname or ""
@@ -76,10 +76,10 @@ num_days = 365
 _NPY_NAME = {"SWE": "swe", "DEPTH": "depth"}
 
 
-#hb: This takes a map box (a left,bottom,right,top corner area) and figures out
-#hb: which rows and columns of the data grid fall inside it. So instead of real
-#hb: world coordinates you get simple counting numbers to slice the array with.
-#hb: Example output: (288, 430, 75, 385)  meaning lat rows 288-430, lon cols 75-385.
+#Context: This takes a map box (a left,bottom,right,top corner area) and figures out
+#Context: which rows and columns of the data grid fall inside it. So instead of real
+#Context: world coordinates you get simple counting numbers to slice the array with.
+#Context: Example output: (288, 430, 75, 385)  meaning lat rows 288-430, lon cols 75-385.
 def _nc_bbox_indices(nc_path, bbox):
     """
     Convert (minx, miny, maxx, maxy) into integer lat/lon slice indices.
@@ -120,10 +120,10 @@ def _nc_bbox_indices(nc_path, bbox):
     return lat_lo, lat_hi, lon_lo, lon_hi
 
 
-#hb: A water year runs from Oct 1 to Sep 30, not Jan to Dec. This tells you which
-#hb: water year a given date belongs too. If the month is October or later it
-#hb: counts as next years water year.
-#hb: Example: a date in Nov 2020 -> output 2021. A date in Mar 2020 -> output 2020.
+#Context: A water year runs from Oct 1 to Sep 30, not Jan to Dec. This tells you which
+#Context: water year a given date belongs too. If the month is October or later it
+#Context: counts as next years water year.
+#Context: Example: a date in Nov 2020 -> output 2021. A date in Mar 2020 -> output 2020.
 def _water_year(d: date) -> int:
     """
     Water year (Oct 1 to Sep 30) for a date.
@@ -131,10 +131,10 @@ def _water_year(d: date) -> int:
     return d.year + 1 if d.month >= 10 else d.year
 
 
-#hb: Given a start and end date, this gives back every water year that the range
-#hb: covers, sorted and with no duplicates. Usefull for knowing which yearly
-#hb: files we need to download.
-#hb: Example: start in late 2019 thru mid 2021 -> output [2020, 2021, 2022]
+#Context: Given a start and end date, this gives back every water year that the range
+#Context: covers, sorted and with no duplicates. Usefull for knowing which yearly
+#Context: files we need to download.
+#Context: Example: start in late 2019 thru mid 2021 -> output [2020, 2021, 2022]
 def _water_years(start: date, end: date) -> list[int]:
     """
     Sorted list of water years that [start, end] touches.
@@ -149,10 +149,10 @@ def _water_years(start: date, end: date) -> list[int]:
 _NC_MAGIC = b"\x89HDF\r\n\x1a\n"
 
 
-#hb: This checks if a file is a real NetCDF file or just junk. It peeks at the
-#hb: first 8 bytes and compares them to the known magic signature these files
-#hb: always start with. Helps us catch a download that got corrupted.
-#hb: Example output: True if its a good file, False if not.
+#Context: This checks if a file is a real NetCDF file or just junk. It peeks at the
+#Context: first 8 bytes and compares them to the known magic signature these files
+#Context: always start with. Helps us catch a download that got corrupted.
+#Context: Example output: True if its a good file, False if not.
 def _is_valid_nc(path: Path) -> bool:
     try:
         with open(path, "rb") as f:
@@ -161,10 +161,10 @@ def _is_valid_nc(path: Path) -> bool:
         return False
 
 
-#hb: This downloads the data file for one water year from NASA, but first it
-#hb: checks if we already have a good copy saved in the cache folder so we dont
-#hb: download it twice. If the cached one is broken it deletes it and tries again.
-#hb: It returns the path to the file on disk once its ready.
+#Context: This downloads the data file for one water year from NASA, but first it
+#Context: checks if we already have a good copy saved in the cache folder so we dont
+#Context: download it twice. If the cached one is broken it deletes it and tries again.
+#Context: It returns the path to the file on disk once its ready.
 def _download_nc(wy: int, cache_dir: Path, username: str, password: str) -> Path:
     dest = cache_dir / f"4km_SWE_Depth_WY{wy}_v01.nc"
     if dest.exists():
@@ -195,10 +195,10 @@ def _download_nc(wy: int, cache_dir: Path, username: str, password: str) -> Path
     return dest
 
 
-#hb: This trims a big dataset down to just the area inside the box you give it
-#hb: (left, bottom, right, top). It uses the lat/lon labels to cut out only the
-#hb: part of the map we care about, like cropping a photo. It has to flip the
-#hb: cut direction depending on wheter latitude goes up or down in the data.
+#Context: This trims a big dataset down to just the area inside the box you give it
+#Context: (left, bottom, right, top). It uses the lat/lon labels to cut out only the
+#Context: part of the map we care about, like cropping a photo. It has to flip the
+#Context: cut direction depending on wheter latitude goes up or down in the data.
 def _bbox_slice(ds: xr.Dataset, bbox: tuple) -> xr.Dataset:
     """
     Clip ``ds`` to bbox (minx, miny, maxx, maxy) using its lat/lon coords.
@@ -209,11 +209,11 @@ def _bbox_slice(ds: xr.Dataset, bbox: tuple) -> xr.Dataset:
     return ds.sel(lon=slice(minx, maxx), lat=lat_slice)
 
 
-#hb: This is the big main job. It downloads the snow data for each day, crops it
-#hb: to our area, and saves it all stacked together into GeoTIFF image files (one
-#hb: layer/band per day). It needs your NASA login in the environment variables.
-#hb: It returns a little dictionary telling you where each output file landed,
-#hb: for example {"SWE": path, "DEPTH": path}.
+#Context: This is the big main job. It downloads the snow data for each day, crops it
+#Context: to our area, and saves it all stacked together into GeoTIFF image files (one
+#Context: layer/band per day). It needs your NASA login in the environment variables.
+#Context: It returns a little dictionary telling you where each output file landed,
+#Context: for example {"SWE": path, "DEPTH": path}.
 def build_swe_stacks(
     manifest: Manifest,
     output_dir: Path,
@@ -312,11 +312,11 @@ def build_swe_stacks(
     return outputs
 
 
-#hb: Simlar to the function above but it saves the data as plain numpy .npy files
-#hb: instead of GeoTIFF images. It walks every calendar day (skipping Feb 29 since
-#hb: the data has no leap days) and stacks them into a 3D block shaped like
-#hb: (number of days, height, width). This keeps the days lined up with the PRISM
-#hb: data so they match row for row. Returns where each .npy file was saved.
+#Context: Simlar to the function above but it saves the data as plain numpy .npy files
+#Context: instead of GeoTIFF images. It walks every calendar day (skipping Feb 29 since
+#Context: the data has no leap days) and stacks them into a 3D block shaped like
+#Context: (number of days, height, width). This keeps the days lined up with the PRISM
+#Context: data so they match row for row. Returns where each .npy file was saved.
 def build_npy_swe_stacks(
     manifest: Manifest,
     output_dir: Path,
@@ -419,11 +419,11 @@ def build_npy_swe_stacks(
     return outputs
 
 
-#hb: Sometimes the data has holes in it (NaN means "no value here"). This fills
-#hb: those holes by looking at the neigboring cells around them in a little 3x3x3
-#hb: cube and taking the average. Cells that already have a value are left alone.
-#hb: Example: an array with some NaN holes goes in, the same array comes back out
-#hb: but with the holes filled by the average of thier neighbors.
+#Context: Sometimes the data has holes in it (NaN means "no value here"). This fills
+#Context: those holes by looking at the neigboring cells around them in a little 3x3x3
+#Context: cube and taking the average. Cells that already have a value are left alone.
+#Context: Example: an array with some NaN holes goes in, the same array comes back out
+#Context: but with the holes filled by the average of thier neighbors.
 def filled_data(data):
     # this function fill nan data using kernel of size 3x3x3. It averages data from kernel and fill it up
     kernel = (
@@ -443,10 +443,10 @@ def filled_data(data):
     return data_filled
 
 
-#hb: This loads a saved .npy data file, fills in its missing holes using the
-#hb: filled_data helper above, and then saves a new copy next to the orignal with
-#hb: "_filled" added to the name. The first file is left untouched.
-#hb: Example: input "swe.npy" -> output a new file called "swe_filled.npy".
+#Context: This loads a saved .npy data file, fills in its missing holes using the
+#Context: filled_data helper above, and then saves a new copy next to the orignal with
+#Context: "_filled" added to the name. The first file is left untouched.
+#Context: Example: input "swe.npy" -> output a new file called "swe_filled.npy".
 def fill_npy(file_path):
     """
     Forklift of Fill_Missing_Data.py.
@@ -469,10 +469,10 @@ def fill_npy(file_path):
     return out_path
 
 
-#hb: This opens a multi layer GeoTIFF image file and reads it into a numbers array
-#hb: shaped (bands, rows, cols). It also turns any "nodata" placeholder values into
-#hb: NaN holes so they can be filled later. It hands back both the numbers and the
-#hb: profile (the map info like size and location).
+#Context: This opens a multi layer GeoTIFF image file and reads it into a numbers array
+#Context: shaped (bands, rows, cols). It also turns any "nodata" placeholder values into
+#Context: NaN holes so they can be filled later. It hands back both the numbers and the
+#Context: profile (the map info like size and location).
 def _read_stack(tif_path):
     """
     Read a multi-band GeoTIFF as (bands, rows, cols) float + rasterio profile.
@@ -486,10 +486,10 @@ def _read_stack(tif_path):
     return data, profile
 
 
-#hb: This is the opposite of _read_stack. It takes a 3D block of numbers and saves
-#hb: it back out as a multi layer GeoTIFF image, reusing the same map info (profile)
-#hb: so the new file knows where it sits on the globe. Nothing is returned, it just
-#hb: writes the file to disk.
+#Context: This is the opposite of _read_stack. It takes a 3D block of numbers and saves
+#Context: it back out as a multi layer GeoTIFF image, reusing the same map info (profile)
+#Context: so the new file knows where it sits on the globe. Nothing is returned, it just
+#Context: writes the file to disk.
 def _write_stack(out_path, data, profile):
     """
     Write a 3D array as a multi-band GeoTIFF, keeping the input's georeferencing.
@@ -499,10 +499,10 @@ def _write_stack(out_path, data, profile):
         dst.write(data.astype(np.float32))
 
 
-#hb: This goes through several GeoTIFF stacks (like SWE and DEPTH), reads each one,
-#hb: fills its holes, and writes out a new "_filled" version. If theres a matching
-#hb: .npy file sitting next to it, it fills that one too so everthing stays in sync.
-#hb: It returns a dictionary mapping each variable name to where its filled file went.
+#Context: This goes through several GeoTIFF stacks (like SWE and DEPTH), reads each one,
+#Context: fills its holes, and writes out a new "_filled" version. If theres a matching
+#Context: .npy file sitting next to it, it fills that one too so everthing stays in sync.
+#Context: It returns a dictionary mapping each variable name to where its filled file went.
 def fill_stacks(stack_paths, output_dir=None, suffix="_filled"):
     """
     Fill NaN values in raster stacks (SWE, DEPTH, ...).

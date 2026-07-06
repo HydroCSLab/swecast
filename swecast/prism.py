@@ -29,10 +29,10 @@ VARIABLES = ("ppt", "tmean")
 _NPY_NAME = {"ppt": "pcp", "tmean": "tmp"}
 
 
-#hb: This function opens the little ".hdr" text file that sits next to a PRISM ".bil"
-#hb: data file. The hdr file holds metadata like how many rows and colums the grid has.
-#hb: It reads each line, and any line thats just two words becomes a key and value in a dict.
-#hb: Example output: {"NROWS":"621","NCOLS":"1405","ULXMAP":"-125.0","XDIM":"0.0416"}
+#Context: This function opens the little ".hdr" text file that sits next to a PRISM ".bil"
+#Context: data file. The hdr file holds metadata like how many rows and colums the grid has.
+#Context: It reads each line, and any line thats just two words becomes a key and value in a dict.
+#Context: Example output: {"NROWS":"621","NCOLS":"1405","ULXMAP":"-125.0","XDIM":"0.0416"}
 def _read_bil_hdr(bil):
     """
     Parse the .hdr sidecar of a PRISM .bil file and return its full metadata dict.
@@ -48,11 +48,11 @@ def _read_bil_hdr(bil):
     return meta
 
 
-#hb: This works out which part of the big PRISM map your wanted box covers.
-#hb: You give it a bounding box (the corners of an area in longitude/latitude) and it
-#hb: returns the starting column, starting row, and how wide and tall that area is in grid cells.
-#hb: It does this by comparing your box corners to the maps top-left corner and cell size.
-#hb: Example output: (75, 333, 310, 142)  (h_grid, v_grid, width, height)
+#Context: This works out which part of the big PRISM map your wanted box covers.
+#Context: You give it a bounding box (the corners of an area in longitude/latitude) and it
+#Context: returns the starting column, starting row, and how wide and tall that area is in grid cells.
+#Context: It does this by comparing your box corners to the maps top-left corner and cell size.
+#Context: Example output: (75, 333, 310, 142)  (h_grid, v_grid, width, height)
 def _prism_bbox_indices(bil, bbox):
     """
     Convert a (minx, miny, maxx, maxy) bbox to (h_grid, v_grid, width, height)
@@ -152,10 +152,10 @@ class Manifest:
     model_filename: "str | None" = None
 
 
-#hb: This is a little helper that picks which setting to use. It checks three places in order.
-#hb: First, if you passed a real value it just uses that. If not, it looks on the manifest
-#hb: object for the named field. And if thats also missing it falls back to the default.
-#hb: Example: _resolve(None, manifest, "write_npy", True) might return True.
+#Context: This is a little helper that picks which setting to use. It checks three places in order.
+#Context: First, if you passed a real value it just uses that. If not, it looks on the manifest
+#Context: object for the named field. And if thats also missing it falls back to the default.
+#Context: Example: _resolve(None, manifest, "write_npy", True) might return True.
 def _resolve(value, manifest, attr, default):
     """
     Resolve a parameter using the precedence: explicit value > manifest field > default.
@@ -170,10 +170,10 @@ def _resolve(value, manifest, attr, default):
     return default
 
 
-#hb: This gives you back every single day from a start date to an end date, one at a time.
-#hb: It includes both the first and last day. It works by starting at start and adding one
-#hb: day over and over untill it passes the end. Its a generator so it hands out dates lazily.
-#hb: Example: start=2020-01-01, end=2020-01-03 gives 2020-01-01, 2020-01-02, 2020-01-03.
+#Context: This gives you back every single day from a start date to an end date, one at a time.
+#Context: It includes both the first and last day. It works by starting at start and adding one
+#Context: day over and over untill it passes the end. Its a generator so it hands out dates lazily.
+#Context: Example: start=2020-01-01, end=2020-01-03 gives 2020-01-01, 2020-01-02, 2020-01-03.
 def _date_range(start: date, end: date):
     d = start
     while d <= end:
@@ -181,10 +181,10 @@ def _date_range(start: date, end: date):
         d += timedelta(days=1)
 
 
-#hb: Same as the date range above but it skips over Feb 29 on leap years.
-#hb: We do this becuase one of the other datasets pretends every year has 365 days, so to
-#hb: line up the two datasets day by day we have to leave out the extra leap day here too.
-#hb: Example: from 2020-02-28 to 2020-03-01 it yields 02-28 then 03-01 (no 02-29).
+#Context: Same as the date range above but it skips over Feb 29 on leap years.
+#Context: We do this becuase one of the other datasets pretends every year has 365 days, so to
+#Context: line up the two datasets day by day we have to leave out the extra leap day here too.
+#Context: Example: from 2020-02-28 to 2020-03-01 it yields 02-28 then 03-01 (no 02-29).
 def _date_range_no_leap(start: date, end: date):
     """
     Yield dates from start to end (inclusive), skipping Feb 29.
@@ -198,11 +198,11 @@ def _date_range_no_leap(start: date, end: date):
             yield d
 
 
-#hb: This grabs one days worth of PRISM weather data from the internet and saves it to disk.
-#hb: If we already downloaded that file before, it just reuses the cached copy to save time.
-#hb: Otherwise it downloads a zip, checks its really a zip, unpacks it, and renames the pieces.
-#hb: It returns the path to the unzipped .bil file on your computer.
-#hb: Example output: /tmp/cache/ppt/20200101.bil
+#Context: This grabs one days worth of PRISM weather data from the internet and saves it to disk.
+#Context: If we already downloaded that file before, it just reuses the cached copy to save time.
+#Context: Otherwise it downloads a zip, checks its really a zip, unpacks it, and renames the pieces.
+#Context: It returns the path to the unzipped .bil file on your computer.
+#Context: Example output: /tmp/cache/ppt/20200101.bil
 def _download_bil(variable: str, d: date, cache_dir: Path) -> Path:
     date_str = d.strftime("%Y%m%d")
     bil_path = cache_dir / variable / f"{date_str}.bil"
@@ -239,10 +239,10 @@ def _download_bil(variable: str, d: date, cache_dir: Path) -> Path:
     return bil_path
 
 
-#hb: This reads the actual numbers out of a .bil data file and turns them into a 2D grid.
-#hb: It first reads the .hdr to learn the rows, colums and number type, then reads the raw
-#hb: bytes and reshapes them into a table of numbers you can do math on.
-#hb: Example output: a numpy array shaped like (621, 1405) full of rainfall or temp values.
+#Context: This reads the actual numbers out of a .bil data file and turns them into a 2D grid.
+#Context: It first reads the .hdr to learn the rows, colums and number type, then reads the raw
+#Context: bytes and reshapes them into a table of numbers you can do math on.
+#Context: Example output: a numpy array shaped like (621, 1405) full of rainfall or temp values.
 def read_bil_file(bil):
     """
     Forklifted from Extract_PCP.py.
@@ -270,11 +270,11 @@ def read_bil_file(bil):
     return data
 
 
-#hb: This downloads rainfall (ppt) and temperature (tmean) for every day you asked for and
-#hb: stacks them into two big numpy files, one per variable. Each file is like a stack of
-#hb: daily maps piled on top of each other, cropped down to just your area of intrest.
-#hb: It returns a dict telling you where each saved file ended up.
-#hb: Example output: {"ppt": ".../pcp.npy", "tmean": ".../tmp.npy"}
+#Context: This downloads rainfall (ppt) and temperature (tmean) for every day you asked for and
+#Context: stacks them into two big numpy files, one per variable. Each file is like a stack of
+#Context: daily maps piled on top of each other, cropped down to just your area of intrest.
+#Context: It returns a dict telling you where each saved file ended up.
+#Context: Example output: {"ppt": ".../pcp.npy", "tmean": ".../tmp.npy"}
 def build_npy_stacks(
     manifest: Manifest,
     output_dir: Path,
@@ -330,11 +330,11 @@ def build_npy_stacks(
     return outputs
 
 
-#hb: This is the main entry point that builds nice GeoTIFF map files for each weather variable.
-#hb: For every day it downloads the data, clips it to your bounding box, and stacks all the days
-#hb: together so each day becomes one band (layer) in the output picture file.
-#hb: If write_npy is on it also makes the .npy stacks by calling the function above.
-#hb: Example output: {"ppt": ".../ppt_stack.tif", "tmean": ".../tmean_stack.tif"}
+#Context: This is the main entry point that builds nice GeoTIFF map files for each weather variable.
+#Context: For every day it downloads the data, clips it to your bounding box, and stacks all the days
+#Context: together so each day becomes one band (layer) in the output picture file.
+#Context: If write_npy is on it also makes the .npy stacks by calling the function above.
+#Context: Example output: {"ppt": ".../ppt_stack.tif", "tmean": ".../tmean_stack.tif"}
 def build_stacks(
     manifest: Manifest,
     output_dir: Path,
