@@ -40,6 +40,11 @@ FIELDS = [
 ]
 
 
+#hb: This function reaches out to a goverment weather website (the USDA AWDB API)
+#hb: over the internet and downloads the list of all active snow stations.
+#hb: It takes no inputs. It gives back a big list of stations, where each station
+#hb: is a dictionary of facts like its name, latitude and longitude.
+#hb: Example output: [{"name":"Mt Rose","latitude":39.3,...}, {"name":"Echo Peak",...}]
 def fetch_stations():
     """
     Fetch all active SWE stations from the USDA AWDB API.
@@ -51,6 +56,11 @@ def fetch_stations():
     return stations
 
 
+#hb: This takes the list of stations (the dictionarys from fetch_stations) and
+#hb: saves them into a CSV file, which is just a simple spreadsheet type text file.
+#hb: It recieves the stations list and a file path to write to. It makes the
+#hb: folder if it dosnt exist yet, then writes one row per station.
+#hb: It dosnt return anything, it just creates the file on disk.
 def stations_to_csv(stations, output_path):
     """
     Write a list of station dicts to CSV.
@@ -67,6 +77,11 @@ def stations_to_csv(stations, output_path):
             writer.writerow(row)
 
 
+#hb: This is the smart helper that decides where to get the stations CSV from.
+#hb: If the settings say to fetch fresh, or we have no saved copy, it downloads
+#hb: new data and saves it. Otherwise it just reuses the cached file to save time.
+#hb: It recieves the settings (manifest) and a folder, and returns the file path
+#hb: to the CSV. Example output: output_dir/.cache/swe_stations.csv
 def get_stations(manifest: Manifest, output_dir: Path) -> Path:
     """
     Resolve the stations CSV, fetching from the API if needed.
@@ -91,6 +106,12 @@ def get_stations(manifest: Manifest, output_dir: Path) -> Path:
     return cache_path
 
 
+#hb: A weather map is split into a grid of little square cells. This function
+#hb: figures out which grid cell each station sits inside, based on its lat/lon.
+#hb: Many stations can land in the same cell, so it removes the duplicates and
+#hb: shifts the numbers so they line up with our smaller study area.
+#hb: It recieves the stations CSV and a NetCDF map file, and saves the cell
+#hb: coordinates to a .npy file. Example output: [[12,5],[12,6],[40,21]..etc]
 def identify_station_cells(
     stations_csv, nc_path, output_path="station_cells.npy", bbox=None
 ):

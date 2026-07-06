@@ -20,6 +20,11 @@ from .stations import (
 )
 
 
+#hb: This is a special helper that Python calls automaticaly when someone asks for
+#hb: a name on this package that doesnt exist yet, like swecast.train_swe. It then
+#hb: loads the heavy TensorFlow stuff only at that moment so just importing swecast stays fast.
+#hb: It recieves the name being looked up and gives back the matching function.
+#hb: Example input: "predict"  ->  Example output: the predict function object
 def __getattr__(name):
     """
     Lazy-import TF-dependent functions so importing swecast does not pull in TensorFlow.

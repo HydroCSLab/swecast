@@ -42,6 +42,11 @@ _VARIANTS = {
 }
 
 
+#hb: This function looks inside a NetCDF weather file and finds which slot (the index)
+#hb: in its list of days matches the date you are after. It reads the files own time
+#hb: list so we dont have to guess how the calander works. It returns a number like 3,
+#hb: meaning the 4th day in the file (counting starts at 0). If the date isnt there it errors out.
+#hb: Example output: 3
 def _find_day_index(nc_path, target):
     """
     Index along ``nc_path``'s time axis that matches ``target``.
@@ -64,6 +69,11 @@ def _find_day_index(nc_path, target):
     raise ValueError(f"Date {target.isoformat()} not found in {nc_path}")
 
 
+#hb: This grabs one single day of snow water (called SWE, basicly how much water is in the snow)
+#hb: from the right yearly file, and crops it down to just the map box we care about using
+#hb: the lat/lon cutoffs. Missing or bad pixels get turned into NaN (a "no value" marker) so
+#hb: they can be filled in later instead of showing a weird fake number like -999.
+#hb: Example output: [[0.0, 1.2, NaN], [3.4, 0.0, 2.1]]
 def _fetch_swe_day(d, nc_paths, lat_lo, lat_hi, lon_lo, lon_hi):
     """
     Read one day of SWE from the NSIDC NetCDF for water_year(d).
@@ -79,6 +89,11 @@ def _fetch_swe_day(d, nc_paths, lat_lo, lat_hi, lon_lo, lon_hi):
     return np.ma.filled(np.ma.asarray(arr).astype(np.float64), np.nan)
 
 
+#hb: This reads one day of PRISM weather data (like rainfall or temperature) for the
+#hb: requested variable, downloads the file if needed, and copies it into a clean grid
+#hb: cropped to our box. It flips the rows so the map comes back top-to-bottom (north on top),
+#hb: the same way the rest of the pipeline expects it. Its a bit slow becuase it loops cell by cell.
+#hb: Example output: [[10.5, 11.0], [9.8, 12.3]]
 def _fetch_prism_day(prism_var, d, cache_dir, bbox):
     """
     Read one day of PRISM ``prism_var`` and clip to bbox.
@@ -96,6 +111,14 @@ def _fetch_prism_day(prism_var, d, cache_dir, bbox):
     return out
 
 
+#hb: This is the main job. It takes a trained AI model and a date you want to forecast, feeds
+#hb: it the few days of snow/weather data right before that date, and asks the model to guess the
+#hb: snow water for the target day. Then it compares that guess to the real measured value to see
+#hb: how close it was. It handles downloads, cropping to the map box, cleaning up the data, and
+#hb: undoing the math scaling so the numbers make sense again.
+#hb: It returns a dictionary with the prediction, the actual value, the difference (residual), and
+#hb: some extra info like the dates used and the map coordinates.
+#hb: Example output: {"predicted":[[..]], "actual":[[..]], "residual":[[..]], "target_date": ...}
 def predict(
     model_path,
     target_date,

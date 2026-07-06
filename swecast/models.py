@@ -28,6 +28,10 @@ class TrainingInputs:
     station_cells: str
 
 
+#hb: This little helper clears out tensorflow/keras memory after a model
+#hb: is done training. If we dont do this the computer slowly fills up its
+#hb: memory and can crash when we train several models one after another.
+#hb: It takes no inputs and gives nothing back, it just cleans house.
 def _cleanup_keras_state():
     """
     Reset TF state between back-to-back train_* calls so we don't OOM.
@@ -38,6 +42,12 @@ def _cleanup_keras_state():
     gc.collect()
 
 
+#hb: This takes a bunch of 3d arrays (time, height, width) and trims them all
+#hb: down so they share the exact same height and width. Sometimes two datasets
+#hb: are off by a row or column at the edges, so we cut to the smallest one so
+#hb: they line up and can be stacked together without errors.
+#hb: Example: an array of shape (10,142,310) and one of (10,141,309) both
+#hb: come back as shape (10,141,309).
 def _align_shapes(*arrays):
     """
     Crop (T, H, W) arrays to the smallest common (H, W).
@@ -52,6 +62,12 @@ def _align_shapes(*arrays):
     return tuple(a[..., :H, :W] for a in arrays)
 
 
+#hb: This saves a trained model to disk so we can load and reuse it later.
+#hb: If saving is turned off it just returns None and does nothing. You can
+#hb: give it a custom file name, otherwise it uses a default name. It figures
+#hb: out the right file extension (.keras or .h5) and returns the full path
+#hb: where the model was written.
+#hb: Example output: "/home/me/output/swe_model.keras"
 def _save_model(
     model, output_dir, variant_default, save_model, model_format, model_filename
 ):
@@ -73,6 +89,12 @@ def _save_model(
     return path
 
 
+#hb: This is the big prep step that gets all the data ready before any model
+#hb: training happens. It downloads weather/snow station info, builds the data
+#hb: stacks for snow water (SWE), precipitation and temperature, fills in any
+#hb: missing gaps, and figures out which grid cell each station sits in.
+#hb: It does NOT train anything, it just makes the files the trainers need and
+#hb: returns there file paths bundled up in a TrainingInputs object.
 def prepare_training_inputs(
     output_dir, *, manifest=None, cache_dir=None
 ) -> TrainingInputs:
@@ -286,6 +308,10 @@ def train_swe(
 
     # prepare for x and y for the model.`x` is frames 0 to n - 1, and `y` is frames n-1 to n.
     # For example, if data from 5 days were used, days 1 to 4 would be used as input features, and day 5 would be used as the target data.
+    #hb: This small helper splits each little stack of days into the input (x)
+    #hb: and the answer (y). x is all the days except the last, y is just the
+    #hb: last day which is the thing we want the model to predict.
+    #hb: Example: input [[1,2,3,4,5]] gives x=[[1,2,3,4]] and y=[[5]].
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :]
@@ -471,6 +497,12 @@ def train_swe(
     _cleanup_keras_state()
 
 
+#hb: Almost the same as train_swe but this one feeds the model TWO things at
+#hb: once: snow water (SWE) and precipitation (PCP, basicaly rain/snowfall).
+#hb: The idea is that knowing how much it precipitated helps predict tomorrows
+#hb: snow better. It stacks both maps on top of each other (each stacked map is
+#hb: called a channel), trains the model, and writes out its own prediction and
+#hb: accuracy files with a _swe_pcp tag.
 def train_swe_pcp(
     swe_filled,
     pcp_filled,
@@ -552,6 +584,11 @@ def train_swe_pcp(
 
     # prepare for x and y for the model.`x` is frames 0 to n - 1, and `y` is frames n-1 to n.
     # For example, if data from 5 days were used, days 1 to 4 would be used as input features, and day 5 would be used as the target data.
+    #hb: Same idea as before but now each day has more than one map stacked
+    #hb: together (snow water plus the other thing, each map is a channel). x is
+    #hb: all the days except the last with every map, and y is just the last days
+    #hb: snow water map (the :1 grabs only the first map) since snow is what we
+    #hb: are actualy trying to guess.
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :, :1]
@@ -701,6 +738,12 @@ def train_swe_pcp(
     _cleanup_keras_state()
 
 
+#hb: Like train_swe but it feeds the model snow water (SWE) together with
+#hb: temperature (TMP). Temperature matters alot for snow because warm days
+#hb: melt it, so giving the model temperature can help it predict tomorrows
+#hb: snow. It stacks the two maps on top of each other (each one is a channel),
+#hb: trains the model and saves its own prediction and accuracy files tagged
+#hb: with swe_tmp.
 def train_swe_tmp(
     swe_filled,
     tmp_filled,
@@ -768,6 +811,10 @@ def train_swe_tmp(
     train_dataset = dataset[train_index]
     val_dataset = dataset[val_index]
 
+    #hb: Splits each stack of days into the input (x) and the answer (y) we want
+    #hb: it to guess. x is all the earlier days with both maps (snow water and
+    #hb: temperature), y is just the last days snow water (the first map, grabbed
+    #hb: by :1) which is what we want to predict.
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :, :1]
@@ -890,6 +937,12 @@ def train_swe_tmp(
     _cleanup_keras_state()
 
 
+#hb: This is the kitchen-sink version: it feeds the model all three things at
+#hb: once, snow water (SWE), temperature (TMP) and precipitation (PCP). The
+#hb: hope is that using every clue gives the best forecast of tomorrows snow.
+#hb: It stacks the three maps on top of each other (each map is a channel),
+#hb: trains the model, and writes out its predictions and accuracy scores
+#hb: tagged with swe_tmp_pcp.
 def train_swe_tmp_pcp(
     swe_filled,
     tmp_filled,
@@ -958,6 +1011,11 @@ def train_swe_tmp_pcp(
     train_dataset = dataset[train_index]
     val_dataset = dataset[val_index]
 
+    #hb: Splits each stack of days into the input (x) and the answer (y) we want
+    #hb: it to guess. Here each day has three maps (snow water, temperature and
+    #hb: precipitation). x keeps all the earlier days and every map, y is just the
+    #hb: last days snow water (the first map via :1), thats the value we want the
+    #hb: model to guess.
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :, :1]
@@ -1081,6 +1139,11 @@ def train_swe_tmp_pcp(
     _cleanup_keras_state()
 
 
+#hb: This one is a bit diffrent: it predicts tomorrows snow water (SWE) using
+#hb: ONLY temperature and precipitation as inputs, not past SWE at all. It
+#hb: still loads SWE but only to use as the answer (target) the model trains
+#hb: against. So its testing wheter weather alone can forecast the snow. Saves
+#hb: its predictions and accuracy files tagged with tmp_pcp.
 def train_tmp_pcp(
     swe_filled,
     tmp_filled,
@@ -1152,6 +1215,11 @@ def train_tmp_pcp(
     train_dataset = dataset[train_index]
     val_dataset = dataset[val_index]
 
+    #hb: Splits each day stack into the input (x) and the answer (y). y is the
+    #hb: last days snow water (the first map via :1). Note that right after
+    #hb: calling this the code trims x down to the 2nd and 3rd maps (1:3), so this
+    #hb: model only feeds on temperature and precipitation and never sees snow
+    #hb: water as an input itself.
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :, :1]
@@ -1275,6 +1343,11 @@ def train_tmp_pcp(
     _cleanup_keras_state()
 
 
+#hb: A models settings (like how many layers or how fast it learns) are called
+#hb: hyperparameters, and picking good ones by hand is hard. This function uses
+#hb: a tool called Optuna to automaticly try lots of diffrent combinations and
+#hb: see which ones train the best. It runs many short trials and keeps track
+#hb: of the winner, then saves some charts showing how the search went.
 def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=None):
     """
     Optuna sweep over the SWE-only ConvLSTM.
@@ -1313,6 +1386,12 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
     ds1 = ds[0:num_data_used, :, :]
 
     # Dataset preparation function
+    #hb: This builds the training data for a given window size (seq_length).
+    #hb: It slides a window across the days to make many little stacks, splits
+    #hb: them into a training pile and a checking pile, shrinks the numbers down
+    #hb: so theyre easier to learn from, and then seperates each stack into the
+    #hb: inputs (x) and the day to predict (y).
+    #hb: It hands back x_train, y_train, x_val, y_val all ready for the model.
     def create_dataset(seq_length):
         dataset = []
         for i in range(0, num_data_used - seq_length):
@@ -1333,6 +1412,10 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
         val_dataset = np.log10(1 + val_dataset) / 3.5
 
         # X, y creation
+        #hb: Same splitter as in the other functions, just living inside here.
+        #hb: x is every day except the last, y is only the last day which is
+        #hb: the one we want the model to predict.
+        #hb: Example: input [[1,2,3,4]] gives x=[[1,2,3]] and y=[[4]].
         def create_shifted_frames(data):
             x = data[:, 0 : data.shape[1] - 1, :, :]
             y = data[:, data.shape[1] - 1 : data.shape[1], :, :]
@@ -1348,6 +1431,11 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
         return x_train, y_train, x_val, y_val
 
     # Build ConvLSTM model for a trial
+    #hb: This assembles the actual neural network for one trial. Optuna gives
+    #hb: it a "trial" object that suggests settings to try, like how many layers,
+    #hb: how many pattern detectors to use, the size of the little window it
+    #hb: scans with, and how big a step it takes when learning. It stacks the
+    #hb: layers up, adds a final layer, compiles it and returns the ready model.
     def build_model(trial, input_shape):
         x_in = keras.Input(shape=input_shape)
         num_layers = trial.suggest_int("num_layers", 1, 2)  # limit to 2 for GPU safety
@@ -1381,6 +1469,12 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
         return model
 
     # Optuna objective function
+    #hb: This is the function Optuna calls over and over, once per trial. It
+    #hb: builds a dataset and a model using the suggested settings, trains it,
+    #hb: and returns the smallest error it got on the checking pile (lower is
+    #hb: better). Optuna uses that number to decide which settings worked well.
+    #hb: If the GPU runs out of memory it just skips that trial by returning
+    #hb: infinity.
     def objective(trial):
         # Suggest sequence length
         seq_length = trial.suggest_int(
@@ -1431,6 +1525,10 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
     print("Best hyperparameters:", study.best_trial.params)
 
     # Save figure helper
+    #hb: A small helper that saves an Optuna chart to an image file. Optuna can
+    #hb: hand back the plot in a few diffrent shapes (a single axes, an array
+    #hb: of axes, or a whole figure), so this sorts out which one it got, digs
+    #hb: out the underlying figure and writes it to disk as the given filename.
     def save_plot(ax, filename):
         # Optuna's plot_* helpers return Axes, an ndarray of Axes, or a
         # Figure depending on the call. Coerce all three to a Figure.
