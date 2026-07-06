@@ -37,6 +37,10 @@ _PACKAGES_MODELS = {
 }
 
 
+#Context: This function looks at a list of python packages and checks if each one is installed.
+#Context: If a package is missing it adds a note to the failures list so we can tell the user later.
+#Context: The 'packages' input is a dict like {"numpy": "numpy"} where the left side is what you import.
+#Context: It dosent return anything, it just prints messages and fills up the failures list.
 def _check_packages(packages: dict, failures: list) -> None:
     """
     Check that required packages are installed, and report any missing ones.
@@ -50,6 +54,10 @@ def _check_packages(packages: dict, failures: list) -> None:
             failures.append(f"Missing package '{import_name}' (pip install {pip_name})")
 
 
+#Context: This checks that certain environment variables (settings stored outside the code) are set.
+#Context: For example it makes sure your NASA username and password exist before we try to use them.
+#Context: If some are missing it prints a helpful 'export NAME=value' tip so you know how to set them.
+#Context: Example input: {"EARTHDATA_USERNAME": "your NASA login"} and a failures list to add problems too.
 def _check_env(env_vars: dict, failures: list) -> None:
     """
     Check that required environment variables are SET, and report any missing ones.
@@ -68,6 +76,10 @@ def _check_env(env_vars: dict, failures: list) -> None:
             print(f'    export {var}="your-value"')
 
 
+#Context: This wraps up the checks and tells you the final result.
+#Context: If the failures list has stuff in it, it prints how many things failed.
+#Context: When raise_on_error is True and there were problems, it stops the program right away.
+#Context: It returns True if everything passed, or False if something went wrong (and we didnt stop).
 def _finish(failures: list, raise_on_error: bool) -> bool:
     """
     Print summary of preflight checks, and exit with error if any failed and raise_on_error is True.
@@ -82,6 +94,10 @@ def _finish(failures: list, raise_on_error: bool) -> bool:
     return True
 
 
+#Context: This is the main check that runs everything at once before the real work starts.
+#Context: It checks all the packages (PRISM, NSIDC and model ones) plus the needed environment variables.
+#Context: Think of it like a pre-flight checklist a pilot does before takeoff, making sure your all set up.
+#Context: Returns True if everything is good. Example output: True (or False if somethings missing).
 def preflight(raise_on_error: bool = True) -> bool:
     """
     Run all preflight checks (packages + environment variables).
@@ -100,6 +116,10 @@ def preflight(raise_on_error: bool = True) -> bool:
     return _finish(failures, raise_on_error)
 
 
+#Context: This is a smaller check just for the model training part of swecast.
+#Context: It only looks at the packages you need for training (like tensorflow, keras, pandas etc).
+#Context: Use this when you only care about training and dont need the data download stuff.
+#Context: Returns True when the training packages are all present. Example output: True
 def preflight_models(raise_on_error: bool = True) -> bool:
     """
     Preflight checks for training
@@ -112,6 +132,10 @@ def preflight_models(raise_on_error: bool = True) -> bool:
     return _finish(failures, raise_on_error)
 
 
+#Context: This check is for when you only want to work with PRISM weather data.
+#Context: PRISM dosent need a NASA Earthdata login, so this skips the username/password checks.
+#Context: It just makes sure the basic packages like requests, numpy and rasterio are installed.
+#Context: Returns True if the PRISM packages are ready to go. Example output: True
 def preflight_prism(raise_on_error: bool = True) -> bool:
     """
     Preflight checks for PRISM-only functionality (no Earthdata required).
@@ -124,6 +148,10 @@ def preflight_prism(raise_on_error: bool = True) -> bool:
     return _finish(failures, raise_on_error)
 
 
+#Context: This check is for the NSIDC snow data (SWE means snow water equivalent).
+#Context: That data comes from NASA so this one DOES need your Earthdata username and password set.
+#Context: It checks the base packages, the extra NSIDC ones, and the environment variables too.
+#Context: Returns True if packages and credentials are all there. Example output: True
 def preflight_nsidc(raise_on_error: bool = True) -> bool:
     """
     Preflight checks for NSIDC SWE functionality (includes Earthdata credentials).

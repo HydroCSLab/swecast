@@ -28,6 +28,10 @@ class TrainingInputs:
     station_cells: str
 
 
+#Context: This little helper clears out tensorflow/keras memory after a model
+#Context: is done training. If we dont do this the computer slowly fills up its
+#Context: memory and can crash when we train several models one after another.
+#Context: It takes no inputs and gives nothing back, it just cleans house.
 def _cleanup_keras_state():
     """
     Reset TF state between back-to-back train_* calls so we don't OOM.
@@ -38,6 +42,12 @@ def _cleanup_keras_state():
     gc.collect()
 
 
+#Context: This takes a bunch of 3d arrays (time, height, width) and trims them all
+#Context: down so they share the exact same height and width. Sometimes two datasets
+#Context: are off by a row or column at the edges, so we cut to the smallest one so
+#Context: they line up and can be stacked together without errors.
+#Context: Example: an array of shape (10,142,310) and one of (10,141,309) both
+#Context: come back as shape (10,141,309).
 def _align_shapes(*arrays):
     """
     Crop (T, H, W) arrays to the smallest common (H, W).
@@ -52,6 +62,12 @@ def _align_shapes(*arrays):
     return tuple(a[..., :H, :W] for a in arrays)
 
 
+#Context: This saves a trained model to disk so we can load and reuse it later.
+#Context: If saving is turned off it just returns None and does nothing. You can
+#Context: give it a custom file name, otherwise it uses a default name. It figures
+#Context: out the right file extension (.keras or .h5) and returns the full path
+#Context: where the model was written.
+#Context: Example output: "/home/me/output/swe_model.keras"
 def _save_model(
     model, output_dir, variant_default, save_model, model_format, model_filename
 ):
@@ -73,6 +89,12 @@ def _save_model(
     return path
 
 
+#Context: This is the big prep step that gets all the data ready before any model
+#Context: training happens. It downloads weather/snow station info, builds the data
+#Context: stacks for snow water (SWE), precipitation and temperature, fills in any
+#Context: missing gaps, and figures out which grid cell each station sits in.
+#Context: It does NOT train anything, it just makes the files the trainers need and
+#Context: returns there file paths bundled up in a TrainingInputs object.
 def prepare_training_inputs(
     output_dir, *, manifest=None, cache_dir=None
 ) -> TrainingInputs:
@@ -206,6 +228,203 @@ def prepare_training_inputs(
     )
 
 
+@dataclass
+class _HParams:
+    """Resolved ConvLSTM hyperparameters shared by every train_* variant."""
+
+    num_days_train: int
+    num_data_used: int
+    epochs: int
+    batch_size: int
+    train_split: float
+    swe_scaling_factor: float
+    es_patience: int
+    rlr_patience: int
+    num_stations: int
+    save_model: bool
+    model_format: str
+    model_filename: str
+
+
+def _resolve_hparams(
+    manifest,
+    *,
+    num_days_train,
+    num_data_used,
+    epochs,
+    batch_size,
+    train_split,
+    swe_scaling_factor,
+    early_stopping_patience,
+    reduce_lr_patience,
+    num_stations,
+    save_model,
+    model_format,
+    model_filename,
+):
+    """
+    Resolve the hyperparameters common to every ConvLSTM variant.
+
+    Each value falls back to ``manifest.<field>`` when the kwarg is None, then
+    to the original script default if neither is set.
+    """
+    return _HParams(
+        # Number of previous time steps used to forecast the next day's SWE; 5
+        # means day 5 is forecast from the previous 4 days of data.
+        num_days_train=_resolve(num_days_train, manifest, "num_days_train", 5),
+        num_data_used=_resolve(num_data_used, manifest, "num_data_used", 7300),  # 8 years (8*365)
+        epochs=_resolve(epochs, manifest, "epochs", 50),
+        batch_size=_resolve(batch_size, manifest, "batch_size", 16),
+        train_split=_resolve(train_split, manifest, "train_split", 0.8),
+        swe_scaling_factor=_resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5),
+        es_patience=_resolve(
+            early_stopping_patience, manifest, "early_stopping_patience", 10
+        ),
+        rlr_patience=_resolve(reduce_lr_patience, manifest, "reduce_lr_patience", 5),
+        num_stations=_resolve(num_stations, manifest, "num_stations", 75),
+        save_model=_resolve(save_model, manifest, "save_model", True),
+        model_format=_resolve(model_format, manifest, "model_format", "keras"),
+        model_filename=_resolve(model_filename, manifest, "model_filename", None),
+    )
+
+
+def _build_convlstm(input_shape):
+    """
+    Build and compile the 3-layer ConvLSTM2D network shared by every variant.
+
+    Three ``ConvLSTM2D`` layers (32 filters, 3x3) with batch normalization
+    between them, followed by a ``Conv2D`` head for the spatiotemporal output.
+    The only thing that differs between variants is the channel count, which is
+    carried by ``input_shape``.
+    """
+    inp = layers.Input(shape=input_shape)
+    x = layers.ConvLSTM2D(
+        filters=32,
+        kernel_size=(3, 3),
+        padding="same",
+        return_sequences=True,
+        activation="relu",
+    )(inp)
+    x = layers.BatchNormalization()(x)
+    x = layers.ConvLSTM2D(
+        filters=32,
+        kernel_size=(3, 3),
+        padding="same",
+        return_sequences=True,
+        activation="relu",
+    )(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.ConvLSTM2D(
+        filters=32,
+        kernel_size=(3, 3),
+        padding="same",
+        return_sequences=False,
+        activation="relu",
+    )(x)
+    x = layers.Conv2D(
+        filters=1,
+        kernel_size=(3, 3),
+        activation="sigmoid",
+        padding="same",
+    )(x)
+    model = keras.models.Model(inp, x)
+    model.compile(
+        loss=keras.losses.binary_crossentropy,
+        optimizer=keras.optimizers.Adam(),
+    )
+    return model
+
+
+def _fit_convlstm(model, x_train, y_train, x_val, y_val, hp):
+    """
+    Fit a compiled ConvLSTM with the shared early-stopping / LR-plateau
+    callbacks and return the Keras ``History``.
+    """
+    early_stopping = keras.callbacks.EarlyStopping(
+        monitor="val_loss", patience=hp.es_patience
+    )
+    reduce_lr = keras.callbacks.ReduceLROnPlateau(
+        monitor="val_loss", patience=hp.rlr_patience
+    )
+    return model.fit(
+        x_train,
+        y_train,
+        batch_size=hp.batch_size,
+        epochs=hp.epochs,
+        validation_data=(x_val, y_val),
+        callbacks=[early_stopping, reduce_lr],
+    )
+
+
+def _evaluate_stations(
+    model, x_val, y_val, station_cells, output_dir, hp, tag, *, ns_filename=None
+):
+    """
+    Compare model predictions against the in-situ stations and write outputs.
+
+    Writes ``Actual_<tag>.npy`` and ``model_output_<tag>.npy`` (de-normalized
+    to the original SWE scale) plus the per-station Nash-Sutcliffe efficiencies
+    to ``ns_filename`` (default ``NS_stations_<tag>.csv``). NS is computed on
+    the original SWE scale; negative predictions are clamped to zero first.
+    """
+    num_stations = hp.num_stations
+    swe_scaling_factor = hp.swe_scaling_factor
+    if ns_filename is None:
+        ns_filename = f"NS_stations_{tag}.csv"
+
+    # Predict frames for all x_val.
+    y_val_prediction = model.predict(x_val)
+
+    # read in coordinates of the stations in our study region
+    latlon = np.load(station_cells).astype(int)
+
+    # extract observed swe for the stations
+    station_swe_origin = []
+    y_val1 = np.squeeze(y_val)
+    np.save(
+        os.path.join(output_dir, f"Actual_{tag}.npy"),
+        (10 ** (y_val1 * swe_scaling_factor) - 1),
+    )
+    for j in range(0, num_stations):
+        station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
+    station_swe_origin = np.array(station_swe_origin)
+
+    # extract predicted swe for the stations
+    station_swe_predict = []
+    y_val_prediction1 = np.squeeze(y_val_prediction)
+    np.save(
+        os.path.join(output_dir, f"model_output_{tag}.npy"),
+        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
+    )
+    for j in range(0, num_stations):
+        station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
+    station_swe_predict = np.array(station_swe_predict)
+
+    # data adjustment: change negative SWE predicts to be 0
+    for j in range(0, station_swe_predict.shape[1]):
+        for i in range(0, num_stations):
+            if station_swe_predict[i, j] < 0:
+                station_swe_predict[i, j] = 0
+
+    # recover the SWE data to original scales, calculate NS for the stations
+    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
+    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
+
+    variances = np.var(station_swe_origin1, axis=1)
+    mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
+    NS_stations = 1 - mse / variances
+    NS_stations = np.round(NS_stations, 3)
+
+    np.savetxt(os.path.join(output_dir, ns_filename), NS_stations, delimiter=",")
+
+
+#Context: This trains an AI model (a type called ConvLSTM) that looks at the last few
+#Context: days of snow water (SWE) and tries to guess the next days snow. So if you
+#Context: give it 4 days it guesses day 5. It loads the data, shrinks the numbers down
+#Context: so theyre easier to learn from, splits them into a training pile and a
+#Context: testing pile, builds the model, trains it, then saves a chart of how the
+#Context: error shrank, the guesses, and an accuracy score (NS) for the real stations.
+#Context: It only uses snow water here, no rain or temperature.
 def train_swe(
     swe_filled,
     station_cells,
@@ -240,52 +459,53 @@ def train_swe(
     output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    num_days_train = _resolve(
-        num_days_train, manifest, "num_days_train", 5
-    )  # Number of previous time steps to be used forecast next day SWE 5 means it will forecast 5th day SWE using previous 4 days data
-    num_data_used = _resolve(
-        num_data_used, manifest, "num_data_used", 7300
-    )  # 8 years of data 8*365
-    epochs = _resolve(epochs, manifest, "epochs", 50)
-    batch_size = _resolve(batch_size, manifest, "batch_size", 16)
-    train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
-    es_patience = _resolve(
-        early_stopping_patience, manifest, "early_stopping_patience", 10
+    hp = _resolve_hparams(
+        manifest,
+        num_days_train=num_days_train,
+        num_data_used=num_data_used,
+        epochs=epochs,
+        batch_size=batch_size,
+        train_split=train_split,
+        swe_scaling_factor=swe_scaling_factor,
+        early_stopping_patience=early_stopping_patience,
+        reduce_lr_patience=reduce_lr_patience,
+        num_stations=num_stations,
+        save_model=save_model,
+        model_format=model_format,
+        model_filename=model_filename,
     )
-    rlr_patience = _resolve(reduce_lr_patience, manifest, "reduce_lr_patience", 5)
-    num_stations = _resolve(num_stations, manifest, "num_stations", 75)
-    save_model = _resolve(save_model, manifest, "save_model", True)
-    model_format = _resolve(model_format, manifest, "model_format", "keras")
-    model_filename = _resolve(model_filename, manifest, "model_filename", None)
 
     # read in SWE data (cast to fp32; Keras weights are fp32 anyway, and this
     # halves the memory footprint of the windowed dataset built below)
     ds = np.load(swe_filled).astype(np.float32, copy=False)
-    ds1 = ds[0:num_data_used, :, :]
+    ds1 = ds[0 : hp.num_data_used, :, :]
 
     # prepare for model input
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
-        dataset.append(ds1[i : i + num_days_train, :, :])
+    for i in range(0, hp.num_data_used - hp.num_days_train):
+        dataset.append(ds1[i : i + hp.num_days_train, :, :])
     dataset = np.array(dataset)
 
     # split the dataset into training and validation parts
     dataset = np.expand_dims(dataset, axis=-1)
     indexes = np.arange(dataset.shape[0])
-    train_index = indexes[: int(train_split * dataset.shape[0])]
-    val_index = indexes[int(train_split * dataset.shape[0]) :]
+    train_index = indexes[: int(hp.train_split * dataset.shape[0])]
+    val_index = indexes[int(hp.train_split * dataset.shape[0]) :]
     train_dataset = dataset[train_index]
     val_dataset = dataset[val_index]
 
     # Normalize the data to the 0-1 range.The study used log normalization
     train_dataset = (
-        np.log10(1 + train_dataset) / swe_scaling_factor
+        np.log10(1 + train_dataset) / hp.swe_scaling_factor
     )  # +1 ensures that zero values do not cause issue and /3.5 scales values to approximately 0-1
-    val_dataset = np.log10(1 + val_dataset) / swe_scaling_factor
+    val_dataset = np.log10(1 + val_dataset) / hp.swe_scaling_factor
 
     # prepare for x and y for the model.`x` is frames 0 to n - 1, and `y` is frames n-1 to n.
     # For example, if data from 5 days were used, days 1 to 4 would be used as input features, and day 5 would be used as the target data.
+    #Context: This small helper splits each little stack of days into the input (x)
+    #Context: and the answer (y). x is all the days except the last, y is just the
+    #Context: last day which is the thing we want the model to predict.
+    #Context: Example: input [[1,2,3,4,5]] gives x=[[1,2,3,4]] and y=[[5]].
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :]
@@ -302,71 +522,11 @@ def train_swe(
     #    Output shape for many-to-one: (batch_size, height, width, channels)
     y_train = np.transpose(y_train, [0, 2, 3, 1, 4])
     y_val = np.transpose(y_val, [0, 2, 3, 1, 4])
-    # y_train = y_train[:, -1, :, :]
-    # y_val = y_val[:, -1, :, :]
 
-    # y_train = np.transpose(y_train, [0, 2, 3, 1, 4])
-    # y_val = np.transpose(y_val, [0, 2, 3, 1, 4])
-
-    # model design
-    inp = layers.Input(shape=(None, *x_train.shape[2:]))
-
-    # We will construct 3 `ConvLSTM2D` layers with batch normalization,
-    # followed by a `Conv2D` layer for the spatiotemporal outputs.
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(inp)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=False,
-        activation="relu",
-    )(x)
-    x = layers.Conv2D(
-        filters=1,
-        kernel_size=(3, 3),
-        activation="sigmoid",
-        padding="same",
-    )(x)
-
-    # Next, we will build the complete model and compile it.
-    model = keras.models.Model(inp, x)
-    model.compile(
-        loss=keras.losses.binary_crossentropy,
-        optimizer=keras.optimizers.Adam(),
-    )
-
-    early_stopping = keras.callbacks.EarlyStopping(
-        monitor="val_loss", patience=es_patience
-    )
-    reduce_lr = keras.callbacks.ReduceLROnPlateau(
-        monitor="val_loss", patience=rlr_patience
-    )
+    model = _build_convlstm((None, *x_train.shape[2:]))
 
     start_time = time.time()
-
-    history = model.fit(
-        x_train,
-        y_train,
-        batch_size=batch_size,
-        epochs=epochs,
-        validation_data=(x_val, y_val),
-        callbacks=[early_stopping, reduce_lr],
-    )
+    history = _fit_convlstm(model, x_train, y_train, x_val, y_val, hp)
     end_time = time.time()
     training_time = end_time - start_time
     print("Total training time:", training_time, "seconds")
@@ -392,85 +552,32 @@ def train_swe(
 
     plt.close()
 
-    _save_model(model, output_dir, "model", save_model, model_format, model_filename)
+    _save_model(
+        model, output_dir, "model", hp.save_model, hp.model_format, hp.model_filename
+    )
 
-    # following part aims at comparing 75 station SWE observations with
-    # predictions from the above model over 580 days in validation data.
-
-    # Predict frames for all x_val.
-
-    y_val_prediction = model.predict(x_val)
-    # print(y_val_prediction.shape)
-
-    # read in coordinates of the 75 stations in our study region
-    latlon = np.load(station_cells)
-    latlon = latlon.astype(int)
-
-    # extract observed swe for the 75 stations
-    station_swe_origin = []
-    y_val1 = np.squeeze(y_val)
-    np.save(
-        os.path.join(output_dir, "Actual_swe.npy"),
-        (10 ** (y_val1 * swe_scaling_factor) - 1),
-    )  # yvalue use for model develop save to plot and visualize contrast with predicted
-    for j in range(0, num_stations):
-        station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
-
-    station_swe_origin = np.array(station_swe_origin)
-
-    # extract predicted swe for the 75 stations
-    station_swe_predict = []
-    y_val_prediction1 = np.squeeze(y_val_prediction)
-    np.save(
-        os.path.join(output_dir, "model_output_swe.npy"),
-        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
-    )  # yvalue predicted
-    for j in range(0, num_stations):
-        station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
-    station_swe_predict = np.array(station_swe_predict)
-    # calculate NS for 75 stations over testing, using transformed data.
-
-    for j in range(0, station_swe_predict.shape[1]):
-        for i in range(0, num_stations):
-            if station_swe_predict[i, j] < 0:
-                station_swe_predict[i, j] = 0
-
-    variances = np.var(station_swe_origin, axis=1)
-    mse = ((station_swe_origin - station_swe_predict) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-
-    """
-    # data adjustment: change negative SWE predicts to be 0
-    for j in range(0, 580):
-        for i in range(0, 75):
-            if station_swe_predict[i, j] < 0:
-                station_swe_predict[i, j] = 0
-
-
-    """
-
-    # recover the SWE data to original scales, calculate NS for 75 stations
-
-    station_swe_origin1 = []
-    station_swe_predict1 = []
-    # station_swe_origin1 = np.exp2(np.log2(10) * 3.5 * station_swe_origin) - 1
-
-    # station_swe_predict1 = np.exp2(np.log2(10) * 3.5 * station_swe_predict) - 1
-
-    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
-
-    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
-
-    variances = np.var(station_swe_origin1, axis=1)
-    mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-    NS_stations = np.round(NS_stations, 3)
-
-    np.savetxt(os.path.join(output_dir, "NS_stations.csv"), NS_stations, delimiter=",")
+    # following part aims at comparing the in-situ station SWE observations with
+    # predictions from the above model over the validation period.
+    _evaluate_stations(
+        model,
+        x_val,
+        y_val,
+        station_cells,
+        output_dir,
+        hp,
+        "swe",
+        ns_filename="NS_stations.csv",
+    )
 
     _cleanup_keras_state()
 
 
+#Context: Almost the same as train_swe but this one feeds the model TWO things at
+#Context: once: snow water (SWE) and precipitation (PCP, basicaly rain/snowfall).
+#Context: The idea is that knowing how much it precipitated helps predict tomorrows
+#Context: snow better. It stacks both maps on top of each other (each stacked map is
+#Context: called a channel), trains the model, and writes out its own prediction and
+#Context: accuracy files with a _swe_pcp tag.
 def train_swe_pcp(
     swe_filled,
     pcp_filled,
@@ -500,47 +607,44 @@ def train_swe_pcp(
     output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    num_days_train = _resolve(
-        num_days_train, manifest, "num_days_train", 5
-    )  # Number of previous time steps to be used forecast next day SWE 5 means it will forecast 5th day SWE using previous 4 days data
-    num_data_used = _resolve(
-        num_data_used, manifest, "num_data_used", 7300
-    )  # 8 years of data 8*365
-    epochs = _resolve(epochs, manifest, "epochs", 50)
-    batch_size = _resolve(batch_size, manifest, "batch_size", 16)
-    train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
-    es_patience = _resolve(
-        early_stopping_patience, manifest, "early_stopping_patience", 10
+    hp = _resolve_hparams(
+        manifest,
+        num_days_train=num_days_train,
+        num_data_used=num_data_used,
+        epochs=epochs,
+        batch_size=batch_size,
+        train_split=train_split,
+        swe_scaling_factor=swe_scaling_factor,
+        early_stopping_patience=early_stopping_patience,
+        reduce_lr_patience=reduce_lr_patience,
+        num_stations=num_stations,
+        save_model=save_model,
+        model_format=model_format,
+        model_filename=model_filename,
     )
-    rlr_patience = _resolve(reduce_lr_patience, manifest, "reduce_lr_patience", 5)
-    num_stations = _resolve(num_stations, manifest, "num_stations", 75)
-    save_model = _resolve(save_model, manifest, "save_model", True)
-    model_format = _resolve(model_format, manifest, "model_format", "keras")
-    model_filename = _resolve(model_filename, manifest, "model_filename", None)
 
     # read in SWE data
     # Cast to fp32 to halve windowed-dataset memory; Keras weights are fp32 anyway
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_pcp = ds_pcp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0 : hp.num_data_used, :, :]
+    ds1_pcp = ds_pcp[0 : hp.num_data_used, :, :]
     ds1_swe, ds1_pcp = _align_shapes(ds1_swe, ds1_pcp)
-    ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
+    ds1_swe = np.log10(1 + ds1_swe) / hp.swe_scaling_factor
     ds1 = np.stack((ds1_swe, ds1_pcp), axis=3)
 
     # prepare for model input
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
-        dataset.append(ds1[i : i + num_days_train, :, :, :])
+    for i in range(0, hp.num_data_used - hp.num_days_train):
+        dataset.append(ds1[i : i + hp.num_days_train, :, :, :])
     dataset = np.array(dataset)
 
     # split the dataset into training and validation parts
     # dataset = np.expand_dims(dataset, axis=-1)
     indexes = np.arange(dataset.shape[0])
-    train_index = indexes[: int(train_split * dataset.shape[0])]
-    val_index = indexes[int(train_split * dataset.shape[0]) :]
+    train_index = indexes[: int(hp.train_split * dataset.shape[0])]
+    val_index = indexes[int(hp.train_split * dataset.shape[0]) :]
     train_dataset = dataset[train_index]
     val_dataset = dataset[val_index]
 
@@ -552,6 +656,11 @@ def train_swe_pcp(
 
     # prepare for x and y for the model.`x` is frames 0 to n - 1, and `y` is frames n-1 to n.
     # For example, if data from 5 days were used, days 1 to 4 would be used as input features, and day 5 would be used as the target data.
+    #Context: Same idea as before but now each day has more than one map stacked
+    #Context: together (snow water plus the other thing, each map is a channel). x is
+    #Context: all the days except the last with every map, and y is just the last days
+    #Context: snow water map (the :1 grabs only the first map) since snow is what we
+    #Context: are actualy trying to guess.
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :, :1]
@@ -568,139 +677,33 @@ def train_swe_pcp(
     #    Output shape for many-to-one: (batch_size, height, width, channels)
     y_train = np.transpose(y_train, [0, 2, 3, 1, 4])
     y_val = np.transpose(y_val, [0, 2, 3, 1, 4])
-    # y_train = y_train[:, -1, :, :]
-    # y_val = y_val[:, -1, :, :]
 
-    # y_train = np.transpose(y_train, [0, 2, 3, 1, 4])
-    # y_val = np.transpose(y_val, [0, 2, 3, 1, 4])
+    model = _build_convlstm((None, *x_train.shape[2:]))
 
-    # model design
-    inp = layers.Input(shape=(None, *x_train.shape[2:]))
-
-    # We will construct 3 `ConvLSTM2D` layers with batch normalization,
-    # followed by a `Conv2D` layer for the spatiotemporal outputs.
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(inp)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=False,
-        activation="relu",
-    )(x)
-    x = layers.Conv2D(
-        filters=1,
-        kernel_size=(3, 3),
-        activation="sigmoid",
-        padding="same",
-    )(x)
-
-    # Next, we will build the complete model and compile it.
-    model = keras.models.Model(inp, x)
-    model.compile(
-        loss=keras.losses.binary_crossentropy,
-        optimizer=keras.optimizers.Adam(),
-    )
-
-    # Define some callbacks to improve training. To get better results
-    # these parameters may be modified
-    early_stopping = keras.callbacks.EarlyStopping(
-        monitor="val_loss", patience=es_patience
-    )
-    reduce_lr = keras.callbacks.ReduceLROnPlateau(
-        monitor="val_loss", patience=rlr_patience
-    )
-
-    # Fit the model to the training data.
-    model.fit(
-        x_train,
-        y_train,
-        batch_size=batch_size,
-        epochs=epochs,
-        validation_data=(x_val, y_val),
-        callbacks=[early_stopping, reduce_lr],
-    )
+    _fit_convlstm(model, x_train, y_train, x_val, y_val, hp)
 
     _save_model(
-        model, output_dir, "model_swe_pcp", save_model, model_format, model_filename
+        model,
+        output_dir,
+        "model_swe_pcp",
+        hp.save_model,
+        hp.model_format,
+        hp.model_filename,
     )
 
-    # following part aims at comparing 75 station SWE observations with
-    # predictions from the above model over 580 days in validation data.
-
-    # Predict frames for all x_val.
-
-    y_val_prediction = model.predict(x_val)
-    # print(y_val_prediction.shape)
-
-    # read in coordinates of the 75 stations in our study region
-    latlon = np.load(station_cells)
-    latlon = latlon.astype(int)
-
-    # extract observed swe for the 75 stations
-    station_swe_origin = []
-    y_val1 = np.squeeze(y_val)
-    np.save(
-        os.path.join(output_dir, "Actual_swe_pcp.npy"),
-        (10 ** (y_val1 * swe_scaling_factor) - 1),
-    )  # yvalue use for model develop save to plot and visualize contrast with predicted
-    for j in range(0, num_stations):
-        station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
-
-    station_swe_origin = np.array(station_swe_origin)
-
-    # extract predicted swe for the 75 stations
-    station_swe_predict = []
-    y_val_prediction1 = np.squeeze(y_val_prediction)
-    np.save(
-        os.path.join(output_dir, "model_output_swe_pcp.npy"),
-        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
-    )  # yvalue predicted
-    for j in range(0, num_stations):
-        station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
-    station_swe_predict = np.array(station_swe_predict)
-    # calculate NS for 75 stations over testing, using transformed data.
-
-    for j in range(0, station_swe_predict.shape[1]):
-        for i in range(0, num_stations):
-            if station_swe_predict[i, j] < 0:
-                station_swe_predict[i, j] = 0
-
-    variances = np.var(station_swe_origin, axis=1)
-    mse = ((station_swe_origin - station_swe_predict) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-
-    # recover the SWE data to original scales, calculate NS for 75 stations
-
-    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
-    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
-
-    variances = np.var(station_swe_origin1, axis=1)
-    mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-    NS_stations = np.round(NS_stations, 3)
-
-    np.savetxt(
-        os.path.join(output_dir, "NS_stations_swe_pcp.csv"), NS_stations, delimiter=","
-    )
+    # following part aims at comparing the in-situ station SWE observations with
+    # predictions from the above model over the validation period.
+    _evaluate_stations(model, x_val, y_val, station_cells, output_dir, hp, "swe_pcp")
 
     _cleanup_keras_state()
 
 
+#Context: Like train_swe but it feeds the model snow water (SWE) together with
+#Context: temperature (TMP). Temperature matters alot for snow because warm days
+#Context: melt it, so giving the model temperature can help it predict tomorrows
+#Context: snow. It stacks the two maps on top of each other (each one is a channel),
+#Context: trains the model and saves its own prediction and accuracy files tagged
+#Context: with swe_tmp.
 def train_swe_tmp(
     swe_filled,
     tmp_filled,
@@ -730,44 +733,49 @@ def train_swe_tmp(
     output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_data_used = _resolve(num_data_used, manifest, "num_data_used", 7300)
-    epochs = _resolve(epochs, manifest, "epochs", 50)
-    batch_size = _resolve(batch_size, manifest, "batch_size", 16)
-    train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
-    es_patience = _resolve(
-        early_stopping_patience, manifest, "early_stopping_patience", 10
+    hp = _resolve_hparams(
+        manifest,
+        num_days_train=num_days_train,
+        num_data_used=num_data_used,
+        epochs=epochs,
+        batch_size=batch_size,
+        train_split=train_split,
+        swe_scaling_factor=swe_scaling_factor,
+        early_stopping_patience=early_stopping_patience,
+        reduce_lr_patience=reduce_lr_patience,
+        num_stations=num_stations,
+        save_model=save_model,
+        model_format=model_format,
+        model_filename=model_filename,
     )
-    rlr_patience = _resolve(reduce_lr_patience, manifest, "reduce_lr_patience", 5)
-    num_stations = _resolve(num_stations, manifest, "num_stations", 75)
-    save_model = _resolve(save_model, manifest, "save_model", True)
-    model_format = _resolve(model_format, manifest, "model_format", "keras")
-    model_filename = _resolve(model_filename, manifest, "model_filename", None)
 
     # read in SWE data (fp32 to halve windowed-dataset memory)
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_tmp = ds_tmp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0 : hp.num_data_used, :, :]
+    ds1_tmp = ds_tmp[0 : hp.num_data_used, :, :]
     ds1_swe, ds1_tmp = _align_shapes(ds1_swe, ds1_tmp)
-    ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
+    ds1_swe = np.log10(1 + ds1_swe) / hp.swe_scaling_factor
     ds1 = np.stack((ds1_swe, ds1_tmp), axis=3)
 
     # prepare for model input
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
-        dataset.append(ds1[i : i + num_days_train, :, :, :])
+    for i in range(0, hp.num_data_used - hp.num_days_train):
+        dataset.append(ds1[i : i + hp.num_days_train, :, :, :])
     dataset = np.array(dataset)
 
     # split the dataset into training and validation parts
     indexes = np.arange(dataset.shape[0])
-    train_index = indexes[: int(train_split * dataset.shape[0])]
-    val_index = indexes[int(train_split * dataset.shape[0]) :]
+    train_index = indexes[: int(hp.train_split * dataset.shape[0])]
+    val_index = indexes[int(hp.train_split * dataset.shape[0]) :]
     train_dataset = dataset[train_index]
     val_dataset = dataset[val_index]
 
+    #Context: Splits each stack of days into the input (x) and the answer (y) we want
+    #Context: it to guess. x is all the earlier days with both maps (snow water and
+    #Context: temperature), y is just the last days snow water (the first map, grabbed
+    #Context: by :1) which is what we want to predict.
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :, :1]
@@ -781,115 +789,30 @@ def train_swe_tmp(
     y_train = np.transpose(y_train, [0, 2, 3, 1, 4])
     y_val = np.transpose(y_val, [0, 2, 3, 1, 4])
 
-    inp = layers.Input(shape=(None, *x_train.shape[2:]))
+    model = _build_convlstm((None, *x_train.shape[2:]))
 
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(inp)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=False,
-        activation="relu",
-    )(x)
-    x = layers.Conv2D(
-        filters=1,
-        kernel_size=(3, 3),
-        activation="sigmoid",
-        padding="same",
-    )(x)
-
-    model = keras.models.Model(inp, x)
-    model.compile(
-        loss=keras.losses.binary_crossentropy,
-        optimizer=keras.optimizers.Adam(),
-    )
-
-    early_stopping = keras.callbacks.EarlyStopping(
-        monitor="val_loss", patience=es_patience
-    )
-    reduce_lr = keras.callbacks.ReduceLROnPlateau(
-        monitor="val_loss", patience=rlr_patience
-    )
-
-    model.fit(
-        x_train,
-        y_train,
-        batch_size=batch_size,
-        epochs=epochs,
-        validation_data=(x_val, y_val),
-        callbacks=[early_stopping, reduce_lr],
-    )
+    _fit_convlstm(model, x_train, y_train, x_val, y_val, hp)
 
     _save_model(
-        model, output_dir, "model_swe_tmp", save_model, model_format, model_filename
+        model,
+        output_dir,
+        "model_swe_tmp",
+        hp.save_model,
+        hp.model_format,
+        hp.model_filename,
     )
 
-    y_val_prediction = model.predict(x_val)
-
-    # read in coordinates of the 75 stations in our study region
-    latlon = np.load(station_cells)
-    latlon = latlon.astype(int)
-
-    station_swe_origin = []
-    y_val1 = np.squeeze(y_val)
-    np.save(
-        os.path.join(output_dir, "Actual_swe_tmp.npy"),
-        (10 ** (y_val1 * swe_scaling_factor) - 1),
-    )
-    for j in range(0, num_stations):
-        station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
-
-    station_swe_origin = np.array(station_swe_origin)
-
-    station_swe_predict = []
-    y_val_prediction1 = np.squeeze(y_val_prediction)
-    np.save(
-        os.path.join(output_dir, "model_output_swe_tmp.npy"),
-        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
-    )
-    for j in range(0, num_stations):
-        station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
-    station_swe_predict = np.array(station_swe_predict)
-
-    for j in range(0, station_swe_predict.shape[1]):
-        for i in range(0, num_stations):
-            if station_swe_predict[i, j] < 0:
-                station_swe_predict[i, j] = 0
-
-    variances = np.var(station_swe_origin, axis=1)
-    mse = ((station_swe_origin - station_swe_predict) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-
-    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
-    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
-
-    variances = np.var(station_swe_origin1, axis=1)
-    mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-    NS_stations = np.round(NS_stations, 3)
-
-    np.savetxt(
-        os.path.join(output_dir, "NS_stations_swe_tmp.csv"), NS_stations, delimiter=","
-    )
+    _evaluate_stations(model, x_val, y_val, station_cells, output_dir, hp, "swe_tmp")
 
     _cleanup_keras_state()
 
 
+#Context: This is the kitchen-sink version: it feeds the model all three things at
+#Context: once, snow water (SWE), temperature (TMP) and precipitation (PCP). The
+#Context: hope is that using every clue gives the best forecast of tomorrows snow.
+#Context: It stacks the three maps on top of each other (each map is a channel),
+#Context: trains the model, and writes out its predictions and accuracy scores
+#Context: tagged with swe_tmp_pcp.
 def train_swe_tmp_pcp(
     swe_filled,
     tmp_filled,
@@ -920,44 +843,50 @@ def train_swe_tmp_pcp(
     output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_data_used = _resolve(num_data_used, manifest, "num_data_used", 7300)
-    epochs = _resolve(epochs, manifest, "epochs", 50)
-    batch_size = _resolve(batch_size, manifest, "batch_size", 16)
-    train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
-    es_patience = _resolve(
-        early_stopping_patience, manifest, "early_stopping_patience", 10
+    hp = _resolve_hparams(
+        manifest,
+        num_days_train=num_days_train,
+        num_data_used=num_data_used,
+        epochs=epochs,
+        batch_size=batch_size,
+        train_split=train_split,
+        swe_scaling_factor=swe_scaling_factor,
+        early_stopping_patience=early_stopping_patience,
+        reduce_lr_patience=reduce_lr_patience,
+        num_stations=num_stations,
+        save_model=save_model,
+        model_format=model_format,
+        model_filename=model_filename,
     )
-    rlr_patience = _resolve(reduce_lr_patience, manifest, "reduce_lr_patience", 5)
-    num_stations = _resolve(num_stations, manifest, "num_stations", 75)
-    save_model = _resolve(save_model, manifest, "save_model", True)
-    model_format = _resolve(model_format, manifest, "model_format", "keras")
-    model_filename = _resolve(model_filename, manifest, "model_filename", None)
 
     # Cast to fp32 to halve windowed-dataset memory; Keras weights are fp32 anyway
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_tmp = ds_tmp[0:num_data_used, :, :]
-    ds1_pcp = ds_pcp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0 : hp.num_data_used, :, :]
+    ds1_tmp = ds_tmp[0 : hp.num_data_used, :, :]
+    ds1_pcp = ds_pcp[0 : hp.num_data_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
-    ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
+    ds1_swe = np.log10(1 + ds1_swe) / hp.swe_scaling_factor
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
 
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
-        dataset.append(ds1[i : i + num_days_train, :, :, :])
+    for i in range(0, hp.num_data_used - hp.num_days_train):
+        dataset.append(ds1[i : i + hp.num_days_train, :, :, :])
     dataset = np.array(dataset)
 
     indexes = np.arange(dataset.shape[0])
-    train_index = indexes[: int(train_split * dataset.shape[0])]
-    val_index = indexes[int(train_split * dataset.shape[0]) :]
+    train_index = indexes[: int(hp.train_split * dataset.shape[0])]
+    val_index = indexes[int(hp.train_split * dataset.shape[0]) :]
     train_dataset = dataset[train_index]
     val_dataset = dataset[val_index]
 
+    #Context: Splits each stack of days into the input (x) and the answer (y) we want
+    #Context: it to guess. Here each day has three maps (snow water, temperature and
+    #Context: precipitation). x keeps all the earlier days and every map, y is just the
+    #Context: last days snow water (the first map via :1), thats the value we want the
+    #Context: model to guess.
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :, :1]
@@ -971,116 +900,31 @@ def train_swe_tmp_pcp(
     y_train = np.transpose(y_train, [0, 2, 3, 1, 4])
     y_val = np.transpose(y_val, [0, 2, 3, 1, 4])
 
-    inp = layers.Input(shape=(None, *x_train.shape[2:]))
+    model = _build_convlstm((None, *x_train.shape[2:]))
 
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(inp)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=False,
-        activation="relu",
-    )(x)
-    x = layers.Conv2D(
-        filters=1,
-        kernel_size=(3, 3),
-        activation="sigmoid",
-        padding="same",
-    )(x)
-
-    model = keras.models.Model(inp, x)
-    model.compile(
-        loss=keras.losses.binary_crossentropy,
-        optimizer=keras.optimizers.Adam(),
-    )
-
-    early_stopping = keras.callbacks.EarlyStopping(
-        monitor="val_loss", patience=es_patience
-    )
-    reduce_lr = keras.callbacks.ReduceLROnPlateau(
-        monitor="val_loss", patience=rlr_patience
-    )
-
-    model.fit(
-        x_train,
-        y_train,
-        batch_size=batch_size,
-        epochs=epochs,
-        validation_data=(x_val, y_val),
-        callbacks=[early_stopping, reduce_lr],
-    )
+    _fit_convlstm(model, x_train, y_train, x_val, y_val, hp)
 
     _save_model(
-        model, output_dir, "model_swe_tmp_pcp", save_model, model_format, model_filename
+        model,
+        output_dir,
+        "model_swe_tmp_pcp",
+        hp.save_model,
+        hp.model_format,
+        hp.model_filename,
     )
 
-    y_val_prediction = model.predict(x_val)
-
-    latlon = np.load(station_cells)
-    latlon = latlon.astype(int)
-
-    station_swe_origin = []
-    y_val1 = np.squeeze(y_val)
-    np.save(
-        os.path.join(output_dir, "Actual_swe_tmp_pcp.npy"),
-        (10 ** (y_val1 * swe_scaling_factor) - 1),
-    )
-    for j in range(0, num_stations):
-        station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
-
-    station_swe_origin = np.array(station_swe_origin)
-
-    station_swe_predict = []
-    y_val_prediction1 = np.squeeze(y_val_prediction)
-    np.save(
-        os.path.join(output_dir, "model_output_swe_tmp_pcp.npy"),
-        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
-    )
-    for j in range(0, num_stations):
-        station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
-    station_swe_predict = np.array(station_swe_predict)
-
-    for j in range(0, station_swe_predict.shape[1]):
-        for i in range(0, num_stations):
-            if station_swe_predict[i, j] < 0:
-                station_swe_predict[i, j] = 0
-
-    variances = np.var(station_swe_origin, axis=1)
-    mse = ((station_swe_origin - station_swe_predict) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-
-    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
-    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
-
-    variances = np.var(station_swe_origin1, axis=1)
-    mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-    NS_stations = np.round(NS_stations, 3)
-
-    np.savetxt(
-        os.path.join(output_dir, "NS_stations_swe_tmp_pcp.csv"),
-        NS_stations,
-        delimiter=",",
+    _evaluate_stations(
+        model, x_val, y_val, station_cells, output_dir, hp, "swe_tmp_pcp"
     )
 
     _cleanup_keras_state()
 
 
+#Context: This one is a bit diffrent: it predicts tomorrows snow water (SWE) using
+#Context: ONLY temperature and precipitation as inputs, not past SWE at all. It
+#Context: still loads SWE but only to use as the answer (target) the model trains
+#Context: against. So its testing wheter weather alone can forecast the snow. Saves
+#Context: its predictions and accuracy files tagged with tmp_pcp.
 def train_tmp_pcp(
     swe_filled,
     tmp_filled,
@@ -1114,44 +958,50 @@ def train_tmp_pcp(
     output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_data_used = _resolve(num_data_used, manifest, "num_data_used", 7300)
-    epochs = _resolve(epochs, manifest, "epochs", 50)
-    batch_size = _resolve(batch_size, manifest, "batch_size", 16)
-    train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
-    es_patience = _resolve(
-        early_stopping_patience, manifest, "early_stopping_patience", 10
+    hp = _resolve_hparams(
+        manifest,
+        num_days_train=num_days_train,
+        num_data_used=num_data_used,
+        epochs=epochs,
+        batch_size=batch_size,
+        train_split=train_split,
+        swe_scaling_factor=swe_scaling_factor,
+        early_stopping_patience=early_stopping_patience,
+        reduce_lr_patience=reduce_lr_patience,
+        num_stations=num_stations,
+        save_model=save_model,
+        model_format=model_format,
+        model_filename=model_filename,
     )
-    rlr_patience = _resolve(reduce_lr_patience, manifest, "reduce_lr_patience", 5)
-    num_stations = _resolve(num_stations, manifest, "num_stations", 75)
-    save_model = _resolve(save_model, manifest, "save_model", True)
-    model_format = _resolve(model_format, manifest, "model_format", "keras")
-    model_filename = _resolve(model_filename, manifest, "model_filename", None)
 
     # Cast to fp32 to halve windowed-dataset memory; Keras weights are fp32 anyway
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_tmp = ds_tmp[0:num_data_used, :, :]
-    ds1_pcp = ds_pcp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0 : hp.num_data_used, :, :]
+    ds1_tmp = ds_tmp[0 : hp.num_data_used, :, :]
+    ds1_pcp = ds_pcp[0 : hp.num_data_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
-    ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
+    ds1_swe = np.log10(1 + ds1_swe) / hp.swe_scaling_factor
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
 
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
-        dataset.append(ds1[i : i + num_days_train, :, :, :])
+    for i in range(0, hp.num_data_used - hp.num_days_train):
+        dataset.append(ds1[i : i + hp.num_days_train, :, :, :])
     dataset = np.array(dataset)
 
     indexes = np.arange(dataset.shape[0])
-    train_index = indexes[: int(train_split * dataset.shape[0])]
-    val_index = indexes[int(train_split * dataset.shape[0]) :]
+    train_index = indexes[: int(hp.train_split * dataset.shape[0])]
+    val_index = indexes[int(hp.train_split * dataset.shape[0]) :]
     train_dataset = dataset[train_index]
     val_dataset = dataset[val_index]
 
+    #Context: Splits each day stack into the input (x) and the answer (y). y is the
+    #Context: last days snow water (the first map via :1). Note that right after
+    #Context: calling this the code trims x down to the 2nd and 3rd maps (1:3), so this
+    #Context: model only feeds on temperature and precipitation and never sees snow
+    #Context: water as an input itself.
     def create_shifted_frames(data):
         x = data[:, 0 : data.shape[1] - 1, :, :, :]
         y = data[:, data.shape[1] - 1 : data.shape[1], :, :, :1]
@@ -1167,114 +1017,29 @@ def train_tmp_pcp(
     y_train = np.transpose(y_train, [0, 2, 3, 1, 4])
     y_val = np.transpose(y_val, [0, 2, 3, 1, 4])
 
-    inp = layers.Input(shape=(None, *x_train.shape[2:]))
+    model = _build_convlstm((None, *x_train.shape[2:]))
 
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(inp)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=True,
-        activation="relu",
-    )(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.ConvLSTM2D(
-        filters=32,
-        kernel_size=(3, 3),
-        padding="same",
-        return_sequences=False,
-        activation="relu",
-    )(x)
-    x = layers.Conv2D(
-        filters=1,
-        kernel_size=(3, 3),
-        activation="sigmoid",
-        padding="same",
-    )(x)
-
-    model = keras.models.Model(inp, x)
-    model.compile(
-        loss=keras.losses.binary_crossentropy,
-        optimizer=keras.optimizers.Adam(),
-    )
-
-    early_stopping = keras.callbacks.EarlyStopping(
-        monitor="val_loss", patience=es_patience
-    )
-    reduce_lr = keras.callbacks.ReduceLROnPlateau(
-        monitor="val_loss", patience=rlr_patience
-    )
-
-    model.fit(
-        x_train,
-        y_train,
-        batch_size=batch_size,
-        epochs=epochs,
-        validation_data=(x_val, y_val),
-        callbacks=[early_stopping, reduce_lr],
-    )
+    _fit_convlstm(model, x_train, y_train, x_val, y_val, hp)
 
     _save_model(
-        model, output_dir, "model_tmp_pcp", save_model, model_format, model_filename
+        model,
+        output_dir,
+        "model_tmp_pcp",
+        hp.save_model,
+        hp.model_format,
+        hp.model_filename,
     )
 
-    y_val_prediction = model.predict(x_val)
-
-    latlon = np.load(station_cells)
-    latlon = latlon.astype(int)
-
-    station_swe_origin = []
-    y_val1 = np.squeeze(y_val)
-    np.save(
-        os.path.join(output_dir, "Actual_tmp_pcp.npy"),
-        (10 ** (y_val1 * swe_scaling_factor) - 1),
-    )
-    for j in range(0, num_stations):
-        station_swe_origin.append(y_val1[:, latlon[j, 0], latlon[j, 1]])
-
-    station_swe_origin = np.array(station_swe_origin)
-
-    station_swe_predict = []
-    y_val_prediction1 = np.squeeze(y_val_prediction)
-    np.save(
-        os.path.join(output_dir, "model_output_tmp_pcp.npy"),
-        (10 ** (y_val_prediction1 * swe_scaling_factor) - 1),
-    )
-    for j in range(0, num_stations):
-        station_swe_predict.append(y_val_prediction1[:, latlon[j, 0], latlon[j, 1]])
-    station_swe_predict = np.array(station_swe_predict)
-
-    for j in range(0, station_swe_predict.shape[1]):
-        for i in range(0, num_stations):
-            if station_swe_predict[i, j] < 0:
-                station_swe_predict[i, j] = 0
-
-    variances = np.var(station_swe_origin, axis=1)
-    mse = ((station_swe_origin - station_swe_predict) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-
-    station_swe_origin1 = 10 ** (swe_scaling_factor * station_swe_origin) - 1
-    station_swe_predict1 = 10 ** (swe_scaling_factor * station_swe_predict) - 1
-
-    variances = np.var(station_swe_origin1, axis=1)
-    mse = ((station_swe_origin1 - station_swe_predict1) ** 2).mean(axis=1)
-    NS_stations = 1 - mse / variances
-    NS_stations = np.round(NS_stations, 3)
-
-    np.savetxt(
-        os.path.join(output_dir, "NS_stations_tmp_pcp.csv"), NS_stations, delimiter=","
-    )
+    _evaluate_stations(model, x_val, y_val, station_cells, output_dir, hp, "tmp_pcp")
 
     _cleanup_keras_state()
 
 
+#Context: A models settings (like how many layers or how fast it learns) are called
+#Context: hyperparameters, and picking good ones by hand is hard. This function uses
+#Context: a tool called Optuna to automaticly try lots of diffrent combinations and
+#Context: see which ones train the best. It runs many short trials and keeps track
+#Context: of the winner, then saves some charts showing how the search went.
 def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=None):
     """
     Optuna sweep over the SWE-only ConvLSTM.
@@ -1313,6 +1078,12 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
     ds1 = ds[0:num_data_used, :, :]
 
     # Dataset preparation function
+    #Context: This builds the training data for a given window size (seq_length).
+    #Context: It slides a window across the days to make many little stacks, splits
+    #Context: them into a training pile and a checking pile, shrinks the numbers down
+    #Context: so theyre easier to learn from, and then seperates each stack into the
+    #Context: inputs (x) and the day to predict (y).
+    #Context: It hands back x_train, y_train, x_val, y_val all ready for the model.
     def create_dataset(seq_length):
         dataset = []
         for i in range(0, num_data_used - seq_length):
@@ -1333,6 +1104,10 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
         val_dataset = np.log10(1 + val_dataset) / 3.5
 
         # X, y creation
+        #Context: Same splitter as in the other functions, just living inside here.
+        #Context: x is every day except the last, y is only the last day which is
+        #Context: the one we want the model to predict.
+        #Context: Example: input [[1,2,3,4]] gives x=[[1,2,3]] and y=[[4]].
         def create_shifted_frames(data):
             x = data[:, 0 : data.shape[1] - 1, :, :]
             y = data[:, data.shape[1] - 1 : data.shape[1], :, :]
@@ -1348,6 +1123,11 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
         return x_train, y_train, x_val, y_val
 
     # Build ConvLSTM model for a trial
+    #Context: This assembles the actual neural network for one trial. Optuna gives
+    #Context: it a "trial" object that suggests settings to try, like how many layers,
+    #Context: how many pattern detectors to use, the size of the little window it
+    #Context: scans with, and how big a step it takes when learning. It stacks the
+    #Context: layers up, adds a final layer, compiles it and returns the ready model.
     def build_model(trial, input_shape):
         x_in = keras.Input(shape=input_shape)
         num_layers = trial.suggest_int("num_layers", 1, 2)  # limit to 2 for GPU safety
@@ -1381,6 +1161,12 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
         return model
 
     # Optuna objective function
+    #Context: This is the function Optuna calls over and over, once per trial. It
+    #Context: builds a dataset and a model using the suggested settings, trains it,
+    #Context: and returns the smallest error it got on the checking pile (lower is
+    #Context: better). Optuna uses that number to decide which settings worked well.
+    #Context: If the GPU runs out of memory it just skips that trial by returning
+    #Context: infinity.
     def objective(trial):
         # Suggest sequence length
         seq_length = trial.suggest_int(
@@ -1431,6 +1217,10 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
     print("Best hyperparameters:", study.best_trial.params)
 
     # Save figure helper
+    #Context: A small helper that saves an Optuna chart to an image file. Optuna can
+    #Context: hand back the plot in a few diffrent shapes (a single axes, an array
+    #Context: of axes, or a whole figure), so this sorts out which one it got, digs
+    #Context: out the underlying figure and writes it to disk as the given filename.
     def save_plot(ax, filename):
         # Optuna's plot_* helpers return Axes, an ndarray of Axes, or a
         # Figure depending on the call. Coerce all three to a Figure.

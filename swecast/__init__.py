@@ -20,6 +20,11 @@ from .stations import (
 )
 
 
+#Context: This is a special helper that Python calls automaticaly when someone asks for
+#Context: a name on this package that doesnt exist yet, like swecast.train_swe. It then
+#Context: loads the heavy TensorFlow stuff only at that moment so just importing swecast stays fast.
+#Context: It recieves the name being looked up and gives back the matching function.
+#Context: Example input: "predict"  ->  Example output: the predict function object
 def __getattr__(name):
     """
     Lazy-import TF-dependent functions so importing swecast does not pull in TensorFlow.
