@@ -237,7 +237,7 @@ def train_swe(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
@@ -266,9 +266,9 @@ def train_swe(
     num_days_train = _resolve(
         num_days_train, manifest, "num_days_train", 5
     )  # Number of previous time steps to be used forecast next day SWE 5 means it will forecast 5th day SWE using previous 4 days data
-    num_data_used = _resolve(
-        num_data_used, manifest, "num_data_used", 7300
-    )  # 8 years of data 8*365
+    num_days_used = _resolve(
+        num_days_used, manifest, "num_days_used", 7300
+    )  # 20 years of data 20*365
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -284,11 +284,11 @@ def train_swe(
     # read in SWE data (cast to fp32; Keras weights are fp32 anyway, and this
     # halves the memory footprint of the windowed dataset built below)
     ds = np.load(swe_filled).astype(np.float32, copy=False)
-    ds1 = ds[0:num_data_used, :, :]
+    ds1 = ds[0:num_days_used, :, :]
 
     # prepare for model input
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :])
     dataset = np.array(dataset)
 
@@ -505,7 +505,7 @@ def train_swe_pcp(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
@@ -528,9 +528,9 @@ def train_swe_pcp(
     num_days_train = _resolve(
         num_days_train, manifest, "num_days_train", 5
     )  # Number of previous time steps to be used forecast next day SWE 5 means it will forecast 5th day SWE using previous 4 days data
-    num_data_used = _resolve(
-        num_data_used, manifest, "num_data_used", 7300
-    )  # 8 years of data 8*365
+    num_days_used = _resolve(
+        num_days_used, manifest, "num_days_used", 7300
+    )  # 20 years of data 20*365
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -549,8 +549,8 @@ def train_swe_pcp(
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
     ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_pcp = ds_pcp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0:num_days_used, :, :]
+    ds1_pcp = ds_pcp[0:num_days_used, :, :]
     ds1_swe, ds1_pcp = _align_shapes(ds1_swe, ds1_pcp)
 
     swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
@@ -567,7 +567,7 @@ def train_swe_pcp(
 
     # prepare for model input
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :, :])
     dataset = np.array(dataset)
 
@@ -744,7 +744,7 @@ def train_swe_tmp(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
@@ -765,7 +765,7 @@ def train_swe_tmp(
     os.makedirs(output_dir, exist_ok=True)
 
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_data_used = _resolve(num_data_used, manifest, "num_data_used", 7300)
+    num_days_used = _resolve(num_days_used, manifest, "num_days_used", 7300)
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -782,8 +782,8 @@ def train_swe_tmp(
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_tmp = ds_tmp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0:num_days_used, :, :]
+    ds1_tmp = ds_tmp[0:num_days_used, :, :]
     ds1_swe, ds1_tmp = _align_shapes(ds1_swe, ds1_tmp)
 
     swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
@@ -800,7 +800,7 @@ def train_swe_tmp(
 
     # prepare for model input
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :, :])
     dataset = np.array(dataset)
 
@@ -942,7 +942,7 @@ def train_swe_tmp_pcp(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
@@ -963,7 +963,7 @@ def train_swe_tmp_pcp(
     os.makedirs(output_dir, exist_ok=True)
 
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_data_used = _resolve(num_data_used, manifest, "num_data_used", 7300)
+    num_days_used = _resolve(num_days_used, manifest, "num_days_used", 7300)
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -982,9 +982,9 @@ def train_swe_tmp_pcp(
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
     ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_tmp = ds_tmp[0:num_data_used, :, :]
-    ds1_pcp = ds_pcp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0:num_days_used, :, :]
+    ds1_tmp = ds_tmp[0:num_days_used, :, :]
+    ds1_pcp = ds_pcp[0:num_days_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
 
     swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
@@ -1005,7 +1005,7 @@ def train_swe_tmp_pcp(
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
 
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :, :])
     dataset = np.array(dataset)
 
@@ -1147,7 +1147,7 @@ def train_tmp_pcp(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
@@ -1171,7 +1171,7 @@ def train_tmp_pcp(
     os.makedirs(output_dir, exist_ok=True)
 
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_data_used = _resolve(num_data_used, manifest, "num_data_used", 7300)
+    num_days_used = _resolve(num_days_used, manifest, "num_days_used", 7300)
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -1190,9 +1190,9 @@ def train_tmp_pcp(
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
     ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_tmp = ds_tmp[0:num_data_used, :, :]
-    ds1_pcp = ds_pcp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0:num_days_used, :, :]
+    ds1_tmp = ds_tmp[0:num_days_used, :, :]
+    ds1_pcp = ds_pcp[0:num_days_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
 
     swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
@@ -1213,7 +1213,7 @@ def train_tmp_pcp(
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
 
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :, :])
     dataset = np.array(dataset)
 
@@ -1380,13 +1380,13 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
 
     # Load SWE data
     ds = np.load(swe_filled)
-    num_data_used = 7300
-    ds1 = ds[0:num_data_used, :, :]
+    num_days_used = 7300
+    ds1 = ds[0:num_days_used, :, :]
 
     # Dataset preparation function
     def create_dataset(seq_length):
         dataset = []
-        for i in range(0, num_data_used - seq_length):
+        for i in range(0, num_days_used - seq_length):
             dataset.append(ds1[i : i + seq_length, :, :])
         dataset = np.array(dataset)
         dataset = np.expand_dims(dataset, axis=-1)
