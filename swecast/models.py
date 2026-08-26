@@ -19,6 +19,8 @@ from keras.models import Model
 from keras.layers import Input
 from .prism import _resolve
 
+import tomli_w
+
 
 @dataclass
 class TrainingInputs:
@@ -53,7 +55,8 @@ def _align_shapes(*arrays):
 
 
 def _save_model(
-    model, output_dir, variant_default, save_model, model_format, model_filename
+    model, output_dir, variant_default, save_model, model_format, model_filename,
+    swe_scaling_factor, pcp_scaling_factor, tmp_scaling_range
 ):
     """
     Save ``model`` and return the path, or None if disabled.
@@ -70,6 +73,27 @@ def _save_model(
         path = os.path.join(output_dir, f"{base}.{model_format}")
     model.save(path)
     print(f"[swecast] Saved trained model -> {path}")
+
+    metadata = {
+            "swe": {
+                "scaling_factor": swe_scaling_factor,
+            },
+        }
+
+    if pcp_scaling_factor is not None:
+        metadata["pcp"] = {
+                "scaling_factor": pcp_scaling_factor,
+            }
+
+    if tmp_scaling_range is not None:
+        metadata["tmp"] = {
+                "scaling_min": tmp_scaling_range[0],
+                "scaling_max": tmp_scaling_range[1],
+            }
+
+    with open(os.path.join(output_dir, f"{base}.toml"), "wb") as f:
+        tomli_w.dump(metadata, f)
+
     return path
 
 
@@ -213,11 +237,10 @@ def train_swe(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -234,7 +257,7 @@ def train_swe(
     Hyperparameters fall back to ``manifest.<field>`` if the kwarg is None,
     then to script defaults if neither is set.
 
-    Writes loss_curve.{png,pdf}, Actual_swe.npy, model_output_swe.npy,
+    Writes loss_curve.{png,pdf}, actual_swe.npy, model_output_swe.npy,
     and NS_stations.csv into ``output_dir``.
     """
     output_dir = str(output_dir)
@@ -243,13 +266,12 @@ def train_swe(
     num_days_train = _resolve(
         num_days_train, manifest, "num_days_train", 5
     )  # Number of previous time steps to be used forecast next day SWE 5 means it will forecast 5th day SWE using previous 4 days data
-    num_data_used = _resolve(
-        num_data_used, manifest, "num_data_used", 7300
-    )  # 8 years of data 8*365
+    num_days_used = _resolve(
+        num_days_used, manifest, "num_days_used", 7300
+    )  # 20 years of data 20*365
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -262,11 +284,11 @@ def train_swe(
     # read in SWE data (cast to fp32; Keras weights are fp32 anyway, and this
     # halves the memory footprint of the windowed dataset built below)
     ds = np.load(swe_filled).astype(np.float32, copy=False)
-    ds1 = ds[0:num_data_used, :, :]
+    ds1 = ds[0:num_days_used, :, :]
 
     # prepare for model input
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :])
     dataset = np.array(dataset)
 
@@ -279,6 +301,10 @@ def train_swe(
     val_dataset = dataset[val_index]
 
     # Normalize the data to the 0-1 range.The study used log normalization
+    swe_scaling_factor = float(np.max(np.log10(1 + train_dataset)))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
+
     train_dataset = (
         np.log10(1 + train_dataset) / swe_scaling_factor
     )  # +1 ensures that zero values do not cause issue and /3.5 scales values to approximately 0-1
@@ -392,7 +418,7 @@ def train_swe(
 
     plt.close()
 
-    _save_model(model, output_dir, "model", save_model, model_format, model_filename)
+    _save_model(model, output_dir, "model", save_model, model_format, model_filename, swe_scaling_factor, None, None)
 
     # following part aims at comparing 75 station SWE observations with
     # predictions from the above model over 580 days in validation data.
@@ -410,7 +436,7 @@ def train_swe(
     station_swe_origin = []
     y_val1 = np.squeeze(y_val)
     np.save(
-        os.path.join(output_dir, "Actual_swe.npy"),
+        os.path.join(output_dir, "actual_swe.npy"),
         (10 ** (y_val1 * swe_scaling_factor) - 1),
     )  # yvalue use for model develop save to plot and visualize contrast with predicted
     for j in range(0, num_stations):
@@ -479,11 +505,10 @@ def train_swe_pcp(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -494,7 +519,7 @@ def train_swe_pcp(
     """
     SWE + PCP variant. Forklift of ConvLSTM_SWE_PCP.py.
 
-    Writes Actual_swe_pcp.npy, model_output_swe_pcp.npy and
+    Writes actual_swe_pcp.npy, model_output_swe_pcp.npy and
     NS_stations_swe_pcp.csv into ``output_dir``.
     """
     output_dir = str(output_dir)
@@ -503,13 +528,12 @@ def train_swe_pcp(
     num_days_train = _resolve(
         num_days_train, manifest, "num_days_train", 5
     )  # Number of previous time steps to be used forecast next day SWE 5 means it will forecast 5th day SWE using previous 4 days data
-    num_data_used = _resolve(
-        num_data_used, manifest, "num_data_used", 7300
-    )  # 8 years of data 8*365
+    num_days_used = _resolve(
+        num_days_used, manifest, "num_days_used", 7300
+    )  # 20 years of data 20*365
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -523,16 +547,27 @@ def train_swe_pcp(
     # Cast to fp32 to halve windowed-dataset memory; Keras weights are fp32 anyway
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
+    ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_pcp = ds_pcp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0:num_days_used, :, :]
+    ds1_pcp = ds_pcp[0:num_days_used, :, :]
     ds1_swe, ds1_pcp = _align_shapes(ds1_swe, ds1_pcp)
+
+    swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
+
+    pcp_scaling_factor = float(np.max(np.log10(1 + ds1_pcp)))
+    if pcp_scaling_factor == 0:
+        pcp_scaling_factor = 1.0
+    ds1_pcp = np.log10(1 + ds1_pcp) / pcp_scaling_factor
+
     ds1 = np.stack((ds1_swe, ds1_pcp), axis=3)
 
     # prepare for model input
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :, :])
     dataset = np.array(dataset)
 
@@ -636,7 +671,7 @@ def train_swe_pcp(
     )
 
     _save_model(
-        model, output_dir, "model_swe_pcp", save_model, model_format, model_filename
+        model, output_dir, "model_swe_pcp", save_model, model_format, model_filename, swe_scaling_factor, pcp_scaling_factor, None
     )
 
     # following part aims at comparing 75 station SWE observations with
@@ -655,7 +690,7 @@ def train_swe_pcp(
     station_swe_origin = []
     y_val1 = np.squeeze(y_val)
     np.save(
-        os.path.join(output_dir, "Actual_swe_pcp.npy"),
+        os.path.join(output_dir, "actual_swe_pcp.npy"),
         (10 ** (y_val1 * swe_scaling_factor) - 1),
     )  # yvalue use for model develop save to plot and visualize contrast with predicted
     for j in range(0, num_stations):
@@ -709,11 +744,10 @@ def train_swe_tmp(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -724,18 +758,17 @@ def train_swe_tmp(
     """
     SWE + TMP variant. Forklift of ConvLSTM_SWE_TEMP.py.
 
-    Writes Actual_swe_tmp.npy, model_output_swe_tmp.npy and
+    Writes actual_swe_tmp.npy, model_output_swe_tmp.npy and
     NS_stations_swe_tmp.csv into ``output_dir``.
     """
     output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_data_used = _resolve(num_data_used, manifest, "num_data_used", 7300)
+    num_days_used = _resolve(num_days_used, manifest, "num_days_used", 7300)
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -749,15 +782,25 @@ def train_swe_tmp(
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_tmp = ds_tmp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0:num_days_used, :, :]
+    ds1_tmp = ds_tmp[0:num_days_used, :, :]
     ds1_swe, ds1_tmp = _align_shapes(ds1_swe, ds1_tmp)
+
+    swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
+
+    tmp_min = float(np.min(ds1_tmp))
+    tmp_max = float(np.max(ds1_tmp))
+    tmp_scaling_range = (tmp_min, tmp_max)
+    ds1_tmp = (ds1_tmp - tmp_min) / (tmp_max - tmp_min)
+
     ds1 = np.stack((ds1_swe, ds1_tmp), axis=3)
 
     # prepare for model input
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :, :])
     dataset = np.array(dataset)
 
@@ -836,7 +879,7 @@ def train_swe_tmp(
     )
 
     _save_model(
-        model, output_dir, "model_swe_tmp", save_model, model_format, model_filename
+        model, output_dir, "model_swe_tmp", save_model, model_format, model_filename, swe_scaling_factor, None, tmp_scaling_range
     )
 
     y_val_prediction = model.predict(x_val)
@@ -848,7 +891,7 @@ def train_swe_tmp(
     station_swe_origin = []
     y_val1 = np.squeeze(y_val)
     np.save(
-        os.path.join(output_dir, "Actual_swe_tmp.npy"),
+        os.path.join(output_dir, "actual_swe_tmp.npy"),
         (10 ** (y_val1 * swe_scaling_factor) - 1),
     )
     for j in range(0, num_stations):
@@ -899,11 +942,10 @@ def train_swe_tmp_pcp(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -914,18 +956,17 @@ def train_swe_tmp_pcp(
     """
     SWE + TMP + PCP variant. Forklift of ConvLSTM_SWE_TEMP_PCP.py.
 
-    Writes Actual_swe_tmp_pcp.npy, model_output_swe_tmp_pcp.npy and
+    Writes actual_swe_tmp_pcp.npy, model_output_swe_tmp_pcp.npy and
     NS_stations_swe_tmp_pcp.csv into ``output_dir``.
     """
     output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_data_used = _resolve(num_data_used, manifest, "num_data_used", 7300)
+    num_days_used = _resolve(num_days_used, manifest, "num_days_used", 7300)
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -939,16 +980,32 @@ def train_swe_tmp_pcp(
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
+    ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_tmp = ds_tmp[0:num_data_used, :, :]
-    ds1_pcp = ds_pcp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0:num_days_used, :, :]
+    ds1_tmp = ds_tmp[0:num_days_used, :, :]
+    ds1_pcp = ds_pcp[0:num_days_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
+
+    swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
+
+    pcp_scaling_factor = float(np.max(np.log10(1 + ds1_pcp)))
+    if pcp_scaling_factor == 0:
+        pcp_scaling_factor = 1.0
+    ds1_pcp = np.log10(1 + ds1_pcp) / pcp_scaling_factor
+
+    tmp_min = float(np.min(ds1_tmp))
+    tmp_max = float(np.max(ds1_tmp))
+    tmp_scaling_range = (tmp_min, tmp_max)
+    ds1_tmp = (ds1_tmp - tmp_min) / (tmp_max - tmp_min)
+
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
 
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :, :])
     dataset = np.array(dataset)
 
@@ -1026,7 +1083,7 @@ def train_swe_tmp_pcp(
     )
 
     _save_model(
-        model, output_dir, "model_swe_tmp_pcp", save_model, model_format, model_filename
+        model, output_dir, "model_swe_tmp_pcp", save_model, model_format, model_filename, swe_scaling_factor, pcp_scaling_factor, tmp_scaling_range
     )
 
     y_val_prediction = model.predict(x_val)
@@ -1037,7 +1094,7 @@ def train_swe_tmp_pcp(
     station_swe_origin = []
     y_val1 = np.squeeze(y_val)
     np.save(
-        os.path.join(output_dir, "Actual_swe_tmp_pcp.npy"),
+        os.path.join(output_dir, "actual_swe_tmp_pcp.npy"),
         (10 ** (y_val1 * swe_scaling_factor) - 1),
     )
     for j in range(0, num_stations):
@@ -1090,11 +1147,10 @@ def train_tmp_pcp(
     *,
     manifest=None,
     num_days_train=None,
-    num_data_used=None,
+    num_days_used=None,
     epochs=None,
     batch_size=None,
     train_split=None,
-    swe_scaling_factor=None,
     early_stopping_patience=None,
     reduce_lr_patience=None,
     num_stations=None,
@@ -1108,18 +1164,17 @@ def train_tmp_pcp(
     SWE still has to be loaded since it provides the y target, but the
     input tensor is sliced to channels 1:3 before fitting.
 
-    Writes Actual_tmp_pcp.npy, model_output_tmp_pcp.npy and
+    Writes actual_tmp_pcp.npy, model_output_tmp_pcp.npy and
     NS_stations_tmp_pcp.csv into ``output_dir``.
     """
     output_dir = str(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_data_used = _resolve(num_data_used, manifest, "num_data_used", 7300)
+    num_days_used = _resolve(num_days_used, manifest, "num_days_used", 7300)
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
-    swe_scaling_factor = _resolve(swe_scaling_factor, manifest, "swe_scaling_factor", 3.5)
     es_patience = _resolve(
         early_stopping_patience, manifest, "early_stopping_patience", 10
     )
@@ -1133,16 +1188,32 @@ def train_tmp_pcp(
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
+    ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
-    ds1_swe = ds_swe[0:num_data_used, :, :]
-    ds1_tmp = ds_tmp[0:num_data_used, :, :]
-    ds1_pcp = ds_pcp[0:num_data_used, :, :]
+    ds1_swe = ds_swe[0:num_days_used, :, :]
+    ds1_tmp = ds_tmp[0:num_days_used, :, :]
+    ds1_pcp = ds_pcp[0:num_days_used, :, :]
     ds1_swe, ds1_tmp, ds1_pcp = _align_shapes(ds1_swe, ds1_tmp, ds1_pcp)
+
+    swe_scaling_factor = float(np.max(np.log10(1 + ds1_swe)))
+    if swe_scaling_factor == 0:
+        swe_scaling_factor = 1.0
     ds1_swe = np.log10(1 + ds1_swe) / swe_scaling_factor
+
+    pcp_scaling_factor = float(np.max(np.log10(1 + ds1_pcp)))
+    if pcp_scaling_factor == 0:
+        pcp_scaling_factor = 1.0
+    ds1_pcp = np.log10(1 + ds1_pcp) / pcp_scaling_factor
+
+    tmp_min = float(np.min(ds1_tmp))
+    tmp_max = float(np.max(ds1_tmp))
+    tmp_scaling_range = (tmp_min, tmp_max)
+    ds1_tmp = (ds1_tmp - tmp_min) / (tmp_max - tmp_min)
+
     ds1 = np.stack((ds1_swe, ds1_tmp, ds1_pcp), axis=3)
 
     dataset = []
-    for i in range(0, num_data_used - num_days_train):
+    for i in range(0, num_days_used - num_days_train):
         dataset.append(ds1[i : i + num_days_train, :, :, :])
     dataset = np.array(dataset)
 
@@ -1222,7 +1293,7 @@ def train_tmp_pcp(
     )
 
     _save_model(
-        model, output_dir, "model_tmp_pcp", save_model, model_format, model_filename
+        model, output_dir, "model_tmp_pcp", save_model, model_format, model_filename, swe_scaling_factor, pcp_scaling_factor, tmp_scaling_range
     )
 
     y_val_prediction = model.predict(x_val)
@@ -1233,7 +1304,7 @@ def train_tmp_pcp(
     station_swe_origin = []
     y_val1 = np.squeeze(y_val)
     np.save(
-        os.path.join(output_dir, "Actual_tmp_pcp.npy"),
+        os.path.join(output_dir, "actual_tmp_pcp.npy"),
         (10 ** (y_val1 * swe_scaling_factor) - 1),
     )
     for j in range(0, num_stations):
@@ -1309,13 +1380,13 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
 
     # Load SWE data
     ds = np.load(swe_filled)
-    num_data_used = 7300
-    ds1 = ds[0:num_data_used, :, :]
+    num_days_used = 7300
+    ds1 = ds[0:num_days_used, :, :]
 
     # Dataset preparation function
     def create_dataset(seq_length):
         dataset = []
-        for i in range(0, num_data_used - seq_length):
+        for i in range(0, num_days_used - seq_length):
             dataset.append(ds1[i : i + seq_length, :, :])
         dataset = np.array(dataset)
         dataset = np.expand_dims(dataset, axis=-1)

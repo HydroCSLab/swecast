@@ -115,10 +115,9 @@ class Manifest:
 
     Training hyperparameters (forklifted from ConvLSTM_*.py):
         num_days_train    : sequence length (5 = forecast day 5 from days 1-4)
-        num_data_used     : how many leading days from the .npy stack to use
+        num_days_used     : how many leading days from the .npy stack to use
         epochs, batch_size: keras.fit args
         train_split       : train/val split ratio (0.8)
-        swe_scaling_factor  : the "/3.5" in log10(1+x)/3.5 normalization
         early_stopping_patience, reduce_lr_patience : callback patience values
         num_stations      : number of stations in the per-station NS loop (75)
 
@@ -134,18 +133,17 @@ class Manifest:
     fetch_stations: bool = False
 
     # Workflow
-    cache_dir: "Path | None" = None
+    cache_dir: Path | None = None
     write_npy: bool = True
     nc_variables: tuple = ("SWE", "DEPTH")
     npy_nc_variables: tuple = ("SWE",)
 
     # Training hyperparameters (forklifted from ConvLSTM_*.py defaults)
     num_days_train: int = 5
-    num_data_used: int = 7300
+    num_days_used: int = 7300
     epochs: int = 50
     batch_size: int = 16
     train_split: float = 0.8
-    swe_scaling_factor: float = 3.5
     early_stopping_patience: int = 10
     reduce_lr_patience: int = 5
     num_stations: int = 75
