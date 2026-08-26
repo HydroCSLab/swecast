@@ -79,20 +79,15 @@ pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotli
 
 # make sure GPU is recognized
 python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
-
-mkdir -p runs/example
-cd runs/example
-python ../../swecast/example.py
-
 mm deactivate
 ```
 
 #### Using an existing micromamba environment
 
 ```bash
-cd ~/work/projects/swecast
 mm activate swecast
 
+cd ~/work/projects/swecast
 mkdir -p runs/example
 cd runs/example
 python ../../swecast/example.py
