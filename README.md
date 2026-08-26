@@ -125,7 +125,7 @@ git clone git@github.com:hydrocslab/swecast.git
 
 # install Python through tensorflow because tensorflow is usually a couple
 # versions behind Python in conda-forge
-mm create -n swecast -y tensorflow rasterio shapely xarray scipy netCDF4 matplotlib rioxarray
+mm create -n swecast -y tensorflow rasterio shapely xarray scipy netCDF4 matplotlib rioxarray tomli_w
 mm activate swecast
 
 # executable stack needed to be cleared on Slackware
