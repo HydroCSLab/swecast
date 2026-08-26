@@ -1,15 +1,11 @@
 # SWECAST (Snow Water Equivalent Forecasting)
 
-> **Development Status**
-> This is an early-stage development module and is **not yet functional**. APIs, behavior, and outputs will change.
-
 <!-- vim-markdown-toc GFM -->
 
 * [Micromamba environment](#micromamba-environment)
   * [PyPI TensorFlow](#pypi-tensorflow)
     * [Creating a new micromamba environment](#creating-a-new-micromamba-environment)
     * [Using an existing micromamba environment](#using-an-existing-micromamba-environment)
-  * [Micromamba TensorFlow (not working)](#micromamba-tensorflow-not-working)
 * [Installation](#installation)
 * [Authentication](#authentication)
 * [Quick start](#quick-start)
@@ -104,49 +100,14 @@ python ../../swecast/example.py
 mm deactivate
 ```
 
-### Micromamba TensorFlow (not working)
-
-```bash
-# install micromamba
-curl -L https://micro.mamba.pm/install.sh | env \
-  BIN_FOLDER="$HOME/local/bin" \
-  PREFIX_LOCATION="$HOME/opt/micromamba" \
-  sh
-
-# create an alias
-echo "alias mm=micromamba" >> ~/.bashrc
-
-# source micromamba
-. ~/.bashrc
-
-mkdir -p ~/work/projects/swecast
-cd ~/work/projects/swecast
-git clone git@github.com:hydrocslab/swecast.git
-
-# install Python through tensorflow because tensorflow is usually a couple
-# versions behind Python in conda-forge
-mm create -n swecast -y tensorflow rasterio shapely xarray scipy netCDF4 matplotlib rioxarray tomli_w
-mm activate swecast
-
-# executable stack needed to be cleared on Slackware
-patchelf --clear-execstack $CONDA_PREFIX/lib/libtensorflow_cc.so.2
-
-# make sure GPU is recognized
-python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
-
-mkdir -p runs/example
-cd runs/example
-python ../../swecast/example.py
-
-# after all this, it still didn't work
-```
-
 ## Installation
 
 For now, install locally:
+```bash
 pip install -e .
+```
 
-* *(This will change once published to PyPI)*
+This will change once published to PyPI.
 
 ## Authentication
 
