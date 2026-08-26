@@ -5,7 +5,7 @@
 * [Micromamba environment](#micromamba-environment)
   * [PyPI TensorFlow](#pypi-tensorflow)
     * [Creating a new micromamba environment](#creating-a-new-micromamba-environment)
-    * [Using an existing micromamba environment](#using-an-existing-micromamba-environment)
+    * [Running the example](#running-the-example)
 * [Installation](#installation)
 * [Authentication](#authentication)
 * [Quick start](#quick-start)
@@ -79,10 +79,11 @@ pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotli
 
 # make sure GPU is recognized
 python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+
 mm deactivate
 ```
 
-#### Using an existing micromamba environment
+#### Running the example
 
 ```bash
 mm activate swecast
