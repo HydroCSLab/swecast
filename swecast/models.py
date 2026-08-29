@@ -55,8 +55,15 @@ def _align_shapes(*arrays):
 
 
 def _save_model(
-    model, output_dir, variant_default, save_model, model_format, model_filename,
-    swe_scaling_factor, pcp_scaling_factor, tmp_scaling_range
+    model,
+    output_dir,
+    variant_default,
+    save_model,
+    model_format,
+    model_filename,
+    swe_scaling_factor,
+    pcp_scaling_factor,
+    tmp_scaling_range,
 ):
     """
     Save ``model`` and return the path, or None if disabled.
@@ -75,21 +82,21 @@ def _save_model(
     print(f"[swecast] Saved trained model -> {path}")
 
     metadata = {
-            "swe": {
-                "scaling_factor": swe_scaling_factor,
-            },
-        }
+        "swe": {
+            "scaling_factor": swe_scaling_factor,
+        },
+    }
 
     if pcp_scaling_factor is not None:
         metadata["pcp"] = {
-                "scaling_factor": pcp_scaling_factor,
-            }
+            "scaling_factor": pcp_scaling_factor,
+        }
 
     if tmp_scaling_range is not None:
         metadata["tmp"] = {
-                "scaling_min": tmp_scaling_range[0],
-                "scaling_max": tmp_scaling_range[1],
-            }
+            "scaling_min": tmp_scaling_range[0],
+            "scaling_max": tmp_scaling_range[1],
+        }
 
     with open(os.path.join(output_dir, f"{base}.toml"), "wb") as f:
         tomli_w.dump(metadata, f)
@@ -418,7 +425,17 @@ def train_swe(
 
     plt.close()
 
-    _save_model(model, output_dir, "model", save_model, model_format, model_filename, swe_scaling_factor, None, None)
+    _save_model(
+        model,
+        output_dir,
+        "model",
+        save_model,
+        model_format,
+        model_filename,
+        swe_scaling_factor,
+        None,
+        None,
+    )
 
     # following part aims at comparing 75 station SWE observations with
     # predictions from the above model over 580 days in validation data.
@@ -671,7 +688,15 @@ def train_swe_pcp(
     )
 
     _save_model(
-        model, output_dir, "model_swe_pcp", save_model, model_format, model_filename, swe_scaling_factor, pcp_scaling_factor, None
+        model,
+        output_dir,
+        "model_swe_pcp",
+        save_model,
+        model_format,
+        model_filename,
+        swe_scaling_factor,
+        pcp_scaling_factor,
+        None,
     )
 
     # following part aims at comparing 75 station SWE observations with
@@ -879,7 +904,15 @@ def train_swe_tmp(
     )
 
     _save_model(
-        model, output_dir, "model_swe_tmp", save_model, model_format, model_filename, swe_scaling_factor, None, tmp_scaling_range
+        model,
+        output_dir,
+        "model_swe_tmp",
+        save_model,
+        model_format,
+        model_filename,
+        swe_scaling_factor,
+        None,
+        tmp_scaling_range,
     )
 
     y_val_prediction = model.predict(x_val)
@@ -1083,7 +1116,15 @@ def train_swe_tmp_pcp(
     )
 
     _save_model(
-        model, output_dir, "model_swe_tmp_pcp", save_model, model_format, model_filename, swe_scaling_factor, pcp_scaling_factor, tmp_scaling_range
+        model,
+        output_dir,
+        "model_swe_tmp_pcp",
+        save_model,
+        model_format,
+        model_filename,
+        swe_scaling_factor,
+        pcp_scaling_factor,
+        tmp_scaling_range,
     )
 
     y_val_prediction = model.predict(x_val)
@@ -1293,7 +1334,15 @@ def train_tmp_pcp(
     )
 
     _save_model(
-        model, output_dir, "model_tmp_pcp", save_model, model_format, model_filename, swe_scaling_factor, pcp_scaling_factor, tmp_scaling_range
+        model,
+        output_dir,
+        "model_tmp_pcp",
+        save_model,
+        model_format,
+        model_filename,
+        swe_scaling_factor,
+        pcp_scaling_factor,
+        tmp_scaling_range,
     )
 
     y_val_prediction = model.predict(x_val)

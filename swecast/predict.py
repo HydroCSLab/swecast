@@ -221,8 +221,8 @@ def predict(
     # Replicate training normalization: log10(1 + x) / swe_scaling_factor on SWE.
     # PCP/TMP are fed raw (matching ConvLSTM_SWE_PCP / TMP / TMP_PCP scripts).
     scaling_factors = {
-            "SWE": swe_scaling_factor,
-            "PCP": pcp_scaling_factor,
+        "SWE": swe_scaling_factor,
+        "PCP": pcp_scaling_factor,
     }
 
     for channel, scaling_factor in scaling_factors.items():
