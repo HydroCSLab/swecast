@@ -1,5 +1,7 @@
 # SWECAST (Snow Water Equivalent Forecasting)
 
+**Citation:** Cho, H., Zhang, S., Barrett, H., Marasini, U., Pokhrel, M., Girlamo, C., Taylor, J. B., Sinclair, L., Eshelman, T., Crozier, E., Under Review. SWECAST: An Open-Source Framework for Reproducible Deep Learning-Based Snow Water Equivalent Forecasting. Environmental Modelling & Software.
+
 <!-- vim-markdown-toc GFM -->
 
 * [Micromamba environment](#micromamba-environment)
