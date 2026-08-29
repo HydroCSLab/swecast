@@ -18,7 +18,6 @@
   * [`fetch_stations(...)`](#fetch_stations)
   * [`stations_to_csv(...)`](#stations_to_csv)
 * [Output](#output)
-* [Development notes](#development-notes)
 
 <!-- vim-markdown-toc -->
 
@@ -174,8 +173,3 @@ Exports station data to CSV format.
 ## Output
 
 All outputs are written to the specified `output_dir`. The structure and formats may change as the project evolves.
-
-## Development notes
-
-* This project is **actively under development**
-* Interfaces are **not yet stable**

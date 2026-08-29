@@ -1,6 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "swecast"
 version = "0.1.0"
+authors = [
+  { name = "Huidae Cho", email = "grass4u@gmail.com" },
+  { name = "Hays Barrett", email = "hays.barrett@gmail.com" },
+]
+description = "Reproducible framework for snow water equivalent (SWE) forecasting"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+license-files = ["COPYING"]
 dependencies = [
   "numpy>=2.0",
   "pandas>=3.0",
@@ -14,9 +27,18 @@ dependencies = [
   "netCDF4>=1.7",
   "matplotlib>=3.8",
 ]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
 
 [project.optional-dependencies]
 models = [
   "tensorflow>=2.15",
   "optuna>=3.5",
 ]
+
+[project.urls]
+Homepage = "https://github.com/HydroCSLab/swecast"
+Repository = "https://github.com/HydroCSLab/swecast"
+Issues = "https://github.com/HydroCSLab/swecast/issues"
