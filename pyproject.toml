@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "swecast"
-version = "0.1.0"
+version = "0.1.0.post1"
 authors = [
   { name = "Huidae Cho", email = "grass4u@gmail.com" },
   { name = "Hays Barrett", email = "hays.barrett@gmail.com" },
