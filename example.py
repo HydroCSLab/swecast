@@ -10,7 +10,7 @@ from swecast import (
 
 # defin a manifest for the data we want to use.
 manifest = Manifest(
-    start=date(2001, 1, 1),
+    start=date(2003, 10, 1),
     end=date(2021, 1, 1),
     bbox=(-121.9, 36.08, -109, 41.98),
     num_data_used=5000,
