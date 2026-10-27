@@ -13,7 +13,7 @@ manifest = Manifest(
     start=date(2003, 10, 1),
     end=date(2021, 1, 1),
     bbox=(-121.9, 36.08, -109, 41.98),
-    num_data_used=5000,
+    num_days_used=5000,
 )
 
 inputs = prepare_training_inputs(

@@ -1,189 +1,266 @@
 """
-Download NSIDC-0719 SWE/Depth NetCDF files and build stacked GeoTIFFs.
+Download SNODAS SWE/Depth grids and build stacked GeoTIFFs on the PRISM 4km grid.
 
-Needs NASA Earthdata credentials. Set them on the manifest or via the
-EARTHDATA_USERNAME / EARTHDATA_PASSWORD environment variables.
+SNODAS (NOAA NOHRSC) is a ~1km (30 arc-second) daily snow model for the
+conterminous US, archived by NSIDC as G02158. No credentials are needed.
 
-Files are organized by water year:
-  URL:  https://daacdata.apps.nsidc.org/pub/DATASETS/nsidc0719_SWE_Snow_Depth_v1/
-  Name: 4km_SWE_Depth_WY{yyyy}_v01.nc
-  Vars: SWE (mm H2O), DEPTH (mm)
+Files are organized by day:
+  URL:  https://noaadata.apps.nsidc.org/NOAA/G02158/masked/{yyyy}/{mm_Mon}/
+  Name: SNODAS_{yyyymmdd}.tar
+  Vars: SWE (product 1034, mm H2O), DEPTH (product 1036, mm)
+
+Each day is cached as a native-resolution CONUS GeoTIFF, then area-averaged
+onto the PRISM 4km grid (the same grid NSIDC-0719 used) so SWE, PCP, and TMP
+stack cell-for-cell.
 """
 
+import gzip
+import io
+import math
 import os
+import tarfile
 from datetime import date
 from pathlib import Path
-from urllib.parse import urlparse
+
 import numpy as np
-import xarray as xr
-import requests
 import rasterio
+import requests
+from rasterio.transform import from_origin
+from rasterio.warp import Resampling, reproject
 from scipy.ndimage import convolve
-from netCDF4 import Dataset as ncdataset
-from netCDF4 import num2date
-from .prism import Manifest, _date_range, _date_range_no_leap, _resolve
+
+from .prism import Manifest, _date_range_no_leap, _resolve
 from .preflight import preflight_nsidc
-from rasterio.transform import from_bounds
-from scipy.ndimage import convolve
-import math
 
-_EARTHDATA_AUTH_HOST = (
-    "urs.earthdata.nasa.gov"  # Thish might be a config option in the future.
+SNODAS_BASE = (
+    "https://noaadata.apps.nsidc.org/NOAA/G02158/masked/"
+    "{d:%Y}/{d:%m_%b}/SNODAS_{d:%Y%m%d}.tar"
 )
-
-
-class _EarthdataSession(requests.Session):
-    """
-    requests.Session that survives Earthdata's OAuth redirect chain.
-
-    The DAAC bounces us to urs.earthdata.nasa.gov for OAuth. Keeping
-    Basic Auth attached during that hop lets the login complete without
-    a browser.
-    """
-
-    def __init__(self, username: str, password: str):
-        super().__init__()
-        self.auth = (username, password)
-
-    def rebuild_auth(self, prepared_request, response):
-        # Only drop auth when redirecting away from both the origin and Earthdata hosts
-        redirect_host = urlparse(prepared_request.url).hostname or ""
-        if redirect_host == _EARTHDATA_AUTH_HOST:
-            return  # keep credentials for the OAuth login step
-        super().rebuild_auth(prepared_request, response)
-
-
-NSIDC_BASE = (
-    "https://daacdata.apps.nsidc.org/pub/DATASETS/"
-    "nsidc0719_SWE_Snow_Depth_v1/4km_SWE_Depth_WY{wy}_v01.nc"
-)
+# First day in the masked archive
+SNODAS_START = date(2003, 9, 30)
+SNODAS_NODATA = -9999
 NC_VARIABLES = ("SWE", "DEPTH")
 
-# Forklifted from Extract_SWE.py.
-# Leap years are not considered, matching the original (num_days = 365 per WY).
-# The original script used a hardcoded region slice [:, 288:430, 75:385] giving a
-# 142x310 array; that was the California study bbox in the .nc grid. We now
-# derive the slice indices from manifest.bbox at runtime instead.
-num_days = 365
+# SNODAS product code per variable, as it appears in the tar member names
+_PRODUCT = {"SWE": "ssmv11034tS", "DEPTH": "ssmv11036tS"}
 
-# .npy filename per NetCDF variable, matching Extract_SWE.py -> swe.npy
+# .npy filename per variable, matching Extract_SWE.py -> swe.npy
 _NPY_NAME = {"SWE": "swe", "DEPTH": "depth"}
 
+# Target grid: PRISM 4km (2.5 arc-minute), edges rather than centroids. This is
+# also the NSIDC-0719 grid, so outputs line up with stacks built from it.
+_GRID_RES = 1 / 24
+_GRID_WEST = -125.0 - _GRID_RES / 2
+_GRID_NORTH = 49.916666666667 + _GRID_RES / 2
+_GRID_ROWS = 621
+_GRID_CRS = "EPSG:4269"
 
-def _nc_bbox_indices(nc_path, bbox):
+
+def _grid_window(bbox):
     """
-    Convert (minx, miny, maxx, maxy) into integer lat/lon slice indices.
+    Convert (minx, miny, maxx, maxy) into a window on the PRISM 4km grid.
 
-    Used by build_npy_swe_stacks for the SWE region slice and by
-    identify_station_cells for the corner offset that maps global grid
-    indices into the local region. Indices come back low-to-high so
-    callers can use them directly: ``data[:, lat_lo:lat_hi, lon_lo:lon_hi]``.
-
-    Size is computed as ``round((max - min) / cell_size)`` to match how
-    _prism_bbox_indices derives PRISM's H/W from .hdr metadata. That's
-    important: the two grids have to come out the same shape, otherwise
-    np.stack downstream will blow up. Origin comes from searchsorted; hi
-    is then origin + size.
-
-    For the original California bbox (-121.9, 36.08, -109, 41.98) on the
-    4km NSIDC grid this returns ~(288, 430, 75, 385), matching the
-    hardcoded slice in Extract_SWE.py.
+    Returns (row_north, col_west, height, width, transform), where transform
+    is the north-up affine of the window. Uses the same floor/ceil edge math
+    as _prism_bbox_indices, so SWE comes out exactly the shape of the PRISM
+    stacks for the same bbox.
     """
-    ds = ncdataset(str(nc_path))
-    # lat_arr and lon_arr are centroids
-    lat_arr = np.asarray(ds.variables["lat"][:])
-    lon_arr = np.asarray(ds.variables["lon"][:])
-    ds.close()
-
-    dy = float(np.abs(lat_arr[1] - lat_arr[0]))
-    dx = float(np.abs(lon_arr[1] - lon_arr[0]))
-
-    # bbox has edges
     minx, miny, maxx, maxy = bbox
 
-    lon_edge0 = lon_arr[0] - dx / 2
+    col_west = int(math.floor((minx - _GRID_WEST) / _GRID_RES))
+    col_east_excl = int(math.ceil((maxx - _GRID_WEST) / _GRID_RES))
+    row_north = int(math.floor((_GRID_NORTH - maxy) / _GRID_RES))
+    row_south_excl = int(math.ceil((_GRID_NORTH - miny) / _GRID_RES))
 
-    if lat_arr[0] < lat_arr[-1]:  # increasing (south-to-north)
-        lat_edge0 = lat_arr[0] - dy / 2
-        lat_lo = int(max(0, math.floor((miny - lat_edge0) / dy)))
-        lat_hi = int(min(len(lat_arr), math.ceil((maxy - lat_edge0) / dy)))
-    else:  # decreasing (north-to-south)
-        lat_edge0 = lat_arr[0] + dy / 2
-        lat_lo = int(max(0, math.floor((lat_edge0 - maxy) / dy)))
-        lat_hi = int(min(len(lat_arr), math.ceil((lat_edge0 - miny) / dy)))
-
-    lon_lo = int(max(0, math.floor((minx - lon_edge0) / dx)))
-    lon_hi = int(min(len(lon_arr), math.ceil((maxx - lon_edge0) / dx)))
-    return lat_lo, lat_hi, lon_lo, lon_hi
+    height = row_south_excl - row_north
+    width = col_east_excl - col_west
+    transform = from_origin(
+        _GRID_WEST + col_west * _GRID_RES,
+        _GRID_NORTH - row_north * _GRID_RES,
+        _GRID_RES,
+        _GRID_RES,
+    )
+    return row_north, col_west, height, width, transform
 
 
-def _water_year(d: date) -> int:
+def swe_grid(bbox):
     """
-    Water year (Oct 1 to Sep 30) for a date.
+    Cell-centre (lat, lon) arrays for the bbox window.
+
+    lat is ascending (south-to-north), matching the row order of the .npy
+    stacks; lon is ascending (west-to-east).
     """
-    return d.year + 1 if d.month >= 10 else d.year
+    _, _, height, width, transform = _grid_window(bbox)
+    west, north = transform.c, transform.f
+    lat = north - (np.arange(height)[::-1] + 0.5) * _GRID_RES
+    lon = west + (np.arange(width) + 0.5) * _GRID_RES
+    return lat, lon
 
 
-def _water_years(start: date, end: date) -> list[int]:
+def _check_start(start: date):
+    if start < SNODAS_START:
+        raise ValueError(
+            f"SNODAS starts on {SNODAS_START.isoformat()}; "
+            f"manifest starts on {start.isoformat()}."
+        )
+
+
+def _parse_header(text: str) -> dict[str, str]:
     """
-    Sorted list of water years that [start, end] touches.
+    Parse a NOHRSC 'key: value' header file.
     """
-    wys = set()
-    for d in _date_range(start, end):
-        wys.add(_water_year(d))
-    return sorted(wys)
+    header = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            header[key.strip()] = value.strip()
+    return header
 
 
-# NetCDF4 (HDF5) magic bytes
-_NC_MAGIC = b"\x89HDF\r\n\x1a\n"
+def _fetch_snodas_day(d: date, variables) -> dict | None:
+    """
+    Download one day's tar and decode ``variables`` into {var: (grid, header)}.
 
+    Returns None if the day is missing from the archive (HTTP 404).
+    """
+    url = SNODAS_BASE.format(d=d)
+    print(f"[swecast] SNODAS {d}: downloading {url}")
+    resp = requests.get(url, timeout=300)
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
 
-def _is_valid_nc(path: Path) -> bool:
     try:
-        with open(path, "rb") as f:
-            return f.read(8) == _NC_MAGIC
-    except OSError:
-        return False
+        tar = tarfile.open(fileobj=io.BytesIO(resp.content))
+    except tarfile.TarError as e:
+        preview = resp.content[:500].decode("utf-8", errors="replace")
+        raise ValueError(
+            f"Expected tar for SNODAS {d}.\nResponse preview:\n{preview}"
+        ) from e
+
+    data, header_text = {}, {}
+    with tar:
+        for member in tar.getmembers():
+            var = next((v for v in variables if _PRODUCT[v] in member.name), None)
+            if var is None:
+                continue
+            content = gzip.decompress(tar.extractfile(member).read())
+            if member.name.endswith(".dat.gz"):
+                data[var] = content
+            elif member.name.endswith((".txt.gz", ".Hdr.gz")):
+                header_text[var] = content.decode("ascii", errors="replace")
+
+    grids = {}
+    for var in variables:
+        if var not in data or var not in header_text:
+            raise ValueError(f"{var} product not found in {url}")
+        header = _parse_header(header_text[var])
+        rows = int(header["Number of rows"])
+        cols = int(header["Number of columns"])
+        grid = np.frombuffer(data[var], dtype=">i2").reshape(rows, cols)
+        grids[var] = (grid.astype(np.int16), header)
+    return grids
 
 
-def _download_nc(wy: int, cache_dir: Path, username: str, password: str) -> Path:
-    dest = cache_dir / f"4km_SWE_Depth_WY{wy}_v01.nc"
-    if dest.exists():
-        if _is_valid_nc(dest):
-            print(f"[swecast] SWE WY{wy}: using cached {dest}")
-            return dest
-        print(f"[swecast] SWE WY{wy}: cached file is corrupt, re-downloading")
-        dest.unlink()
-
-    url = NSIDC_BASE.format(wy=wy)
-    print(f"[swecast] SWE WY{wy}: downloading {url}")
-    session = _EarthdataSession(username, password)
-    with session.get(url, stream=True, timeout=300) as resp:
-        resp.raise_for_status()
-        # Check magic bytes from first chunk before committing to disk
-        first_chunk = next(resp.iter_content(chunk_size=8), b"")
-        if first_chunk[:8] != _NC_MAGIC:
-            preview = first_chunk.decode("utf-8", errors="replace")
-            raise ValueError(
-                f"Expected NetCDF4 for WY{wy}, got unexpected content.\n"
-                f"Response preview: {preview!r}"
-            )
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        with open(dest, "wb") as f:
-            f.write(first_chunk)
-            for chunk in resp.iter_content(chunk_size=1 << 20):
-                f.write(chunk)
-    return dest
-
-
-def _bbox_slice(ds: xr.Dataset, bbox: tuple) -> xr.Dataset:
+def _write_snodas_tif(grid, header, out: Path):
     """
-    Clip ``ds`` to bbox (minx, miny, maxx, maxy) using its lat/lon coords.
+    Write a native-resolution SNODAS grid, georeferenced from its own header.
+
+    The masked grid's extent shifts slightly between eras (e.g. pre/post
+    2013), so the transform has to come from each day's header.
     """
-    minx, miny, maxx, maxy = bbox
-    lat = ds["lat"].values
-    lat_slice = slice(miny, maxy) if lat[0] < lat[-1] else slice(maxy, miny)
-    return ds.sel(lon=slice(minx, maxx), lat=lat_slice)
+    transform = from_origin(
+        float(header["Minimum x-axis coordinate"]),
+        float(header["Maximum y-axis coordinate"]),
+        float(header["X-axis resolution"]),
+        float(header["Y-axis resolution"]),
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".tmp")
+    with rasterio.open(
+        tmp,
+        "w",
+        driver="GTiff",
+        height=grid.shape[0],
+        width=grid.shape[1],
+        count=1,
+        dtype="int16",
+        crs="EPSG:4326",
+        transform=transform,
+        nodata=SNODAS_NODATA,
+        compress="deflate",
+    ) as dst:
+        dst.write(grid, 1)
+        dst.update_tags(units="mm")
+    # Rename last so an interrupted write never looks like a cache hit
+    tmp.replace(out)
+
+
+def _download_snodas_day(d: date, cache_dir: Path, variables) -> dict | None:
+    """
+    Return {var: cached native-resolution GeoTIFF} for one day.
+
+    Returns None (after a warning) if the day is missing from the archive;
+    callers write an all-NaN frame that filled_data gap-fills later.
+    """
+    paths = {
+        var: Path(cache_dir) / "snodas" / _NPY_NAME[var] / f"{d:%Y%m%d}.tif"
+        for var in variables
+    }
+    if all(p.exists() for p in paths.values()):
+        return paths
+
+    grids = _fetch_snodas_day(d, variables)
+    if grids is None:
+        print(f"[swecast] SNODAS {d}: missing from archive, leaving it as NaN")
+        return None
+    for var, (grid, header) in grids.items():
+        _write_snodas_tif(grid, header, paths[var])
+    return paths
+
+
+def _read_day_on_grid(tif_path, bbox) -> np.ndarray:
+    """
+    Area-average a cached SNODAS GeoTIFF onto the bbox window of the 4km grid.
+
+    Returns a north-up (H, W) float64 array with NaN where every source cell
+    was nodata. The ~1km cells don't line up with the 4km edges, so this is a
+    proper area-weighted average rather than a 5x5 block mean.
+    """
+    _, _, height, width, transform = _grid_window(bbox)
+    out = np.full((height, width), np.nan, dtype=np.float64)
+    with rasterio.open(tif_path) as src:
+        reproject(
+            rasterio.band(src, 1),
+            out,
+            src_nodata=SNODAS_NODATA,
+            dst_transform=transform,
+            dst_crs=_GRID_CRS,
+            dst_nodata=np.nan,
+            resampling=Resampling.average,
+        )
+    return out
+
+
+def _read_stacks(manifest, cache_dir, variables) -> tuple[list, dict]:
+    """
+    Read every day in the manifest for ``variables``, north-up.
+
+    Walks _date_range_no_leap (like the PRISM builders) so the time axis lines
+    up row-for-row with pcp.npy / tmp.npy. Returns (dates, {var: (T, H, W)}).
+    """
+    _check_start(manifest.start)
+    dates = list(_date_range_no_leap(manifest.start, manifest.end))
+    _, _, height, width, _ = _grid_window(manifest.bbox)
+
+    stacks = {var: np.full((len(dates), height, width), np.nan) for var in variables}
+    for i, d in enumerate(dates):
+        paths = _download_snodas_day(d, cache_dir, variables)
+        if paths is None:
+            continue
+        for var in variables:
+            stacks[var][i] = _read_day_on_grid(paths[var], manifest.bbox)
+    return dates, stacks
 
 
 def build_swe_stacks(
@@ -194,9 +271,8 @@ def build_swe_stacks(
     variables: tuple | None = None,
 ) -> dict[str, Path]:
     """
-    Download NSIDC-0719 SWE/DEPTH per day, clip to bbox, write band-per-day GeoTIFFs.
-
-    Needs $EARTHDATA_USERNAME and $EARTHDATA_PASSWORD set.
+    Download SNODAS SWE/DEPTH per day, resample to the 4km grid, clip to bbox,
+    and write band-per-day GeoTIFFs.
 
     With ``write_npy=True`` (default) we also drop the script-faithful
     swe.npy stack via build_npy_swe_stacks, matching Extract_SWE.py.
@@ -212,71 +288,35 @@ def build_swe_stacks(
     variables = _resolve(variables, manifest, "nc_variables", NC_VARIABLES)
 
     preflight_nsidc()
-    username = os.environ["EARTHDATA_USERNAME"]
-    password = os.environ["EARTHDATA_PASSWORD"]
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = Path(cache_dir) if cache_dir else output_dir / ".cache"
 
-    dates = list(_date_range_no_leap(manifest.start, manifest.end))
-    wys = _water_years(manifest.start, manifest.end)
-
-    # Download and open all needed water-year files
-    nc_by_wy: dict[int, xr.Dataset] = {}
-    for wy in wys:
-        nc_path = _download_nc(wy, cache_dir, username, password)
-        nc_by_wy[wy] = xr.open_dataset(nc_path, engine="netcdf4")
+    dates, stacks = _read_stacks(manifest, cache_dir, variables)
+    _, _, height, width, transform = _grid_window(manifest.bbox)
+    profile = {
+        "driver": "GTiff",
+        "dtype": "float32",
+        "width": width,
+        "height": height,
+        "count": len(dates),
+        "crs": _GRID_CRS,
+        "transform": transform,
+        "compress": "lzw",
+        "nodata": np.nan,
+    }
 
     outputs = {}
     for variable in variables:
-        arrays = []
-        profile = None
-
-        for d in dates:
-            ds = nc_by_wy[_water_year(d)]
-
-            da = ds[variable].sel(time=np.datetime64(d))
-            clipped = _bbox_slice(da.to_dataset(name=variable), manifest.bbox)[variable]
-
-            if profile is None:
-
-                lons = clipped.lon.values
-                lats = clipped.lat.values
-                transform = from_bounds(
-                    lons.min(),
-                    lats.min(),
-                    lons.max(),
-                    lats.max(),
-                    len(lons),
-                    len(lats),
-                )
-                profile = {
-                    "driver": "GTiff",
-                    "dtype": str(clipped.values.dtype),
-                    "width": len(lons),
-                    "height": len(lats),
-                    "count": len(dates),
-                    "crs": "EPSG:4269",
-                    "transform": transform,
-                    "compress": "lzw",
-                    "nodata": ds[variable].attrs.get("_FillValue", None),
-                }
-
-            arrays.append(clipped.values)
-
         out_path = output_dir / f"{variable.lower()}_stack.tif"
         with rasterio.open(out_path, "w", **profile) as dst:
-            for i, (arr, d) in enumerate(zip(arrays, dates), start=1):
-                dst.write(arr, i)
+            for i, (arr, d) in enumerate(zip(stacks[variable], dates), start=1):
+                dst.write(arr.astype(np.float32), i)
                 dst.update_tags(i, date=d.isoformat())
 
         outputs[variable] = out_path
         print(f"[swecast] {variable}: wrote {len(dates)}-band stack -> {out_path}")
-
-    # Clean up open datasets
-    for ds in nc_by_wy.values():
-        ds.close()
 
     if write_npy:
         build_npy_swe_stacks(manifest, output_dir, cache_dir=cache_dir)
@@ -294,15 +334,13 @@ def build_npy_swe_stacks(
     Forklift of Extract_SWE.py, retimed so the time axis lines up with PRISM.
 
     Walks calendar dates from manifest.start to manifest.end (skipping
-    Feb 29 since NSIDC-0719 has no leap days) and writes (T, H, W) stacks:
+    Feb 29, like build_npy_stacks) and writes (T, H, W) stacks:
         swe.npy   (always)
         depth.npy (only if "DEPTH" is in ``variables``)
 
-    Row i corresponds to the same calendar date as row i in pcp.npy /
-    tmp.npy from build_npy_stacks, since both walk _date_range_no_leap.
-    The original Extract_SWE.py iterated water years starting Oct 1 of
-    (start_year - 1); the underlying NSIDC convention is unchanged, but
-    the .npy time axis now starts at manifest.start so PRISM lines up.
+    Rows run south-to-north (row 0 is the southern edge), the same order as
+    the PRISM .npy stacks and the original NSIDC-0719 slice, so station_cells
+    and multi-channel stacking stay aligned. Days missing from SNODAS are NaN.
 
     ``cache_dir`` and ``variables`` (mapped to ``manifest.npy_nc_variables``)
     fall back to the manifest if not passed.
@@ -311,73 +349,18 @@ def build_npy_swe_stacks(
     variables = _resolve(variables, manifest, "npy_nc_variables", ("SWE",))
 
     preflight_nsidc()
-    username = os.environ["EARTHDATA_USERNAME"]
-    password = os.environ["EARTHDATA_PASSWORD"]
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = Path(cache_dir) if cache_dir else output_dir / ".cache"
 
-    # Iterate calendar dates, skipping Feb 29 (NSIDC-0719 doesn't have it).
-    # This is the same iteration build_npy_stacks (PRISM) uses, so the time
-    # axes align row-for-row across all .npy stacks.
-    dates = list(_date_range_no_leap(manifest.start, manifest.end))
-    needed_wys = sorted({_water_year(d) for d in dates})
-
-    # Download / locate every water-year .nc the date range touches
-    nc_paths = {
-        wy: _download_nc(wy, cache_dir, username, password) for wy in needed_wys
-    }
-
-    # Region slice from manifest.bbox (replaces the original hardcoded
-    # [:, 288:430, 75:385] in Extract_SWE.py).
-    sample_nc = nc_paths[needed_wys[0]]
-    lat_lo, lat_hi, lon_lo, lon_hi = _nc_bbox_indices(sample_nc, manifest.bbox)
-    height = lat_hi - lat_lo
-    width = lon_hi - lon_lo
-    print(
-        f"[swecast] SWE region: lat[{lat_lo}:{lat_hi}], lon[{lon_lo}:{lon_hi}] -> ({height}, {width})"
-    )
-
-    # Build a (year, month, day) -> time-axis index map for each .nc, so we
-    # can look up any calendar date in O(1).
-    day_indices = {}
-    for wy, nc_path in nc_paths.items():
-        with ncdataset(str(nc_path)) as ds:
-            times = ds.variables["time"]
-            date_objs = num2date(
-                times[:], times.units, getattr(times, "calendar", "standard")
-            )
-        day_indices[wy] = {(d.year, d.month, d.day): i for i, d in enumerate(date_objs)}
+    dates, stacks = _read_stacks(manifest, cache_dir, variables)
+    print(f"[swecast] SWE region: {stacks[variables[0]].shape[1:]}")
 
     outputs = {}
     for variable in variables:
-        # XXX: if your computer's capability is limited, don't extract ds_swe and ds2
-        # simultanuously
-        ds_swe = np.zeros((len(dates), height, width))
-        nc_handles = {wy: ncdataset(str(p)) for wy, p in nc_paths.items()}
-        try:
-            for p, d in enumerate(dates):  # p = running data-row counter
-                wy = _water_year(d)
-                key = (d.year, d.month, d.day)
-                if key not in day_indices[wy]:
-                    raise ValueError(
-                        f"Date {d.isoformat()} not present in {nc_paths[wy]}"
-                    )
-                day_idx = day_indices[wy][key]
-                arr = nc_handles[wy].variables[variable][
-                    day_idx, lat_lo:lat_hi, lon_lo:lon_hi
-                ]
-                # NSIDC variables come back as masked arrays with a fill_value
-                # like -999.0; convert masked elements to NaN so filled_data
-                # can gap-fill them downstream (it checks np.isnan, not the
-                # fill_value).
-                ds_swe[p] = np.ma.filled(np.ma.asarray(arr).astype(np.float64), np.nan)
-        finally:
-            for h in nc_handles.values():
-                h.close()
-        ds_swe = np.array(ds_swe)
-        # ds_swe.shape: (len(dates), height, width)
+        # flip north-up to south-to-north rows
+        ds_swe = stacks[variable][:, ::-1, :]
         out_path = output_dir / f"{_NPY_NAME[variable]}.npy"
         np.save(out_path, ds_swe)
         outputs[variable] = out_path

@@ -44,10 +44,10 @@ def _align_shapes(*arrays):
     """
     Crop (T, H, W) arrays to the smallest common (H, W).
 
-    NSIDC and PRISM resolve the same bbox via different code paths
-    (searchsorted vs. round-to-cell) so they can disagree by a row or
-    column at the edges. Original scripts hardcoded h=142, w=310 and never
-    hit this; bbox-driven extraction does, and np.stack barfs without it.
+    SNODAS is resampled onto the PRISM grid with the same edge math, so
+    shapes should already match; this stays as a safety net for stacks
+    built by older versions, where NSIDC-0719 and PRISM could disagree by a
+    row or column at the edges and np.stack barfs without it.
     """
     H = min(a.shape[-2] for a in arrays)
     W = min(a.shape[-1] for a in arrays)
@@ -112,7 +112,7 @@ def prepare_training_inputs(
 
     This function executes the SWECAST data-preparation workflow and generates
     the intermediate files required by the ConvLSTM training routines. The
-    workflow includes station acquisition, PRISM and NSIDC stack generation,
+    workflow includes station acquisition, PRISM and SNODAS stack generation,
     gap filling, and construction of station-to-grid-cell mappings used for
     station-based model evaluation.
 
@@ -126,10 +126,9 @@ def prepare_training_inputs(
         SWECAST manifest specifying the study period, spatial domain, data
         acquisition settings, and training configuration.
     cache_dir : str | Path, optional
-        Directory containing cached NSIDC NetCDF files used to obtain the
-        latitude-longitude grid required for station-cell identification.
-        If not specified, defaults to ``manifest.cache_dir`` when available,
-        or ``<output_dir>/.cache``.
+        Directory for cached PRISM and SNODAS downloads. If not specified,
+        defaults to ``manifest.cache_dir`` when available, or
+        ``<output_dir>/.cache``.
 
     Returns
     -------
@@ -152,7 +151,7 @@ def prepare_training_inputs(
     The generated workflow includes:
 
     1. Acquisition of station metadata.
-    2. Construction of PRISM and NSIDC data stacks.
+    2. Construction of PRISM and SNODAS data stacks.
     3. Gap filling of SWE, precipitation, and temperature datasets.
     4. Filtering of stations to the study domain.
     5. Identification of station grid-cell locations for evaluation.
@@ -171,9 +170,11 @@ def prepare_training_inputs(
     stations_csv = get_stations(manifest, output_dir)
 
     # build stacks
-    outputs = build_stacks(manifest, output_dir=output_dir)
+    outputs = build_stacks(manifest, output_dir=output_dir, cache_dir=cache_dir)
     # swe stacks
-    swe_outputs = build_swe_stacks(manifest, output_dir=output_dir)
+    swe_outputs = build_swe_stacks(
+        manifest, output_dir=output_dir, cache_dir=cache_dir
+    )
 
     # Gap-fill SWE stacks (also fills sibling swe.npy -> swe_filled.npy)
     filled_stacks = fill_stacks(swe_outputs)
@@ -190,17 +191,6 @@ def prepare_training_inputs(
             f"Expected {swe_filled} alongside the filled SWE GeoTIFF. "
             "Re-run build_swe_stacks (write_npy=True default) and fill_stacks."
         )
-
-    # Find an NSIDC .nc file for the lat/lon grid used by identify_station_cells
-    cache_dir = _resolve(cache_dir, manifest, "cache_dir", None)
-    cache_dir = Path(cache_dir) if cache_dir else swe_tif.parent / ".cache"
-    nc_files = sorted(cache_dir.glob("4km_SWE_Depth_WY*_v01.nc"))
-    if not nc_files:
-        raise FileNotFoundError(
-            f"No NSIDC NetCDF files found in {cache_dir}. "
-            "Run build_swe_stacks first to populate the cache."
-        )
-    nc_path = nc_files[0]
 
     # Filter the AWDB-style stations CSV to those inside the SWE stack's bbox,
     # then write a 3-column (id, lat, lon) CSV without header, which is what
@@ -224,9 +214,8 @@ def prepare_training_inputs(
     )
 
     station_cells = output_dir / "station_cells.npy"
-    bbox = getattr(manifest, "bbox", None) if manifest is not None else None
     identify_station_cells(
-        formatted_csv, nc_path, output_path=str(station_cells), bbox=bbox
+        formatted_csv, manifest.bbox, output_path=str(station_cells)
     )
 
     return TrainingInputs(

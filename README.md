@@ -76,7 +76,7 @@ cat > $CONDA_PREFIX/etc/conda/deactivate.d/tensorflow-cuda.sh <<'EOF'
 export LD_LIBRARY_PATH="$_OLD_LD_LIBRARY_PATH"
 EOF
 
-pip install tensorflow[and-cuda] rasterio shapely xarray scipy netCDF4 matplotlib rioxarray tomli_w
+pip install tensorflow[and-cuda] rasterio shapely scipy matplotlib tomli_w
 
 . $CONDA_PREFIX/etc/conda/activate.d/tensorflow-cuda.sh
 
@@ -108,16 +108,10 @@ pip install -e .
 
 This will change once published to PyPI.
 
-## Authentication
+## Data sources
 
-`swecast` requires access to external data services. You must set your Earthdata credentials as environment variables before running the module:
-
-```bash
-export EARTHDATA_USERNAME='your_earthdata_username'
-export EARTHDATA_PASSWORD='your_earthdata_password'
-```
-
-Without these, data downloads will fail.
+* **SWE / snow depth**: [SNODAS](https://nsidc.org/data/g02158) (NOAA NOHRSC, archived by NSIDC as G02158), downloaded daily from `https://noaadata.apps.nsidc.org/NOAA/G02158/masked`. SNODAS is ~1 km; `swecast` area-averages it onto the PRISM 4 km grid so SWE, precipitation, and temperature stack cell-for-cell. The archive starts on **2003-09-30**, so `manifest.start` must not be earlier. No credentials are needed.
+* **Precipitation / temperature**: [PRISM](https://prism.oregonstate.edu) 4 km daily.
 
 ## Quick start
 
@@ -128,8 +122,8 @@ from swecast import Manifest, build_stacks, build_swe_stacks
 from swecast import fetch_stations, stations_to_csv, fill_stacks
 
 manifest = Manifest(
-    start=date(2001, 1, 1),
-    end=date(2002, 1, 1),
+    start=date(2003, 10, 1),
+    end=date(2004, 10, 1),
     bbox=(-121.9, 36.08, -109, 41.98),
 )
 
@@ -160,7 +154,7 @@ Builds general geospatial data stacks for the given manifest.
 
 ### `build_swe_stacks(manifest, output_dir)`
 
-Builds Snow Water Equivalent (SWE) stacks.
+Builds Snow Water Equivalent (SWE) and snow depth stacks from SNODAS, resampled to the PRISM 4 km grid.
 
 ### `fill_stacks(stacks)`
 

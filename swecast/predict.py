@@ -1,19 +1,16 @@
 """
 Run a trained ConvLSTM on a target date and compare against the actual SWE.
 
-Retrospective validation: pick a date covered by NSIDC-0719, have the
+Retrospective validation: pick a date covered by SNODAS, have the
 model forecast that day's SWE from the (num_days_train - 1) days
-before it, then compare the prediction with the actual NSIDC value.
+before it, then compare the prediction with the actual SNODAS value.
 This is what the QGIS validation plugin sits on top of.
 """
 
-import os
 from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
-from netCDF4 import Dataset as ncdataset
-from netCDF4 import num2date
 
 from .preflight import preflight_models
 from .prism import (
@@ -24,10 +21,13 @@ from .prism import (
     read_bil_file,
 )
 from .nsidc import (
-    _download_nc,
-    _water_year,
-    _nc_bbox_indices,
+    _GRID_ROWS,
+    _check_start,
+    _download_snodas_day,
+    _grid_window,
+    _read_day_on_grid,
     filled_data,
+    swe_grid,
 )
 
 import tomllib
@@ -44,41 +44,19 @@ _VARIANTS = {
 }
 
 
-def _find_day_index(nc_path, target):
+def _fetch_swe_day(d, cache_dir, bbox):
     """
-    Index along ``nc_path``'s time axis that matches ``target``.
+    Read one day of SNODAS SWE on the 4km grid, rows south-to-north.
 
-    Uses the file's own time variable and units so we don't have to
-    assume a particular water-year start or leap-day handling.
+    Days missing from the archive come back all-NaN so filled_data can
+    gap-fill them.
     """
-    with ncdataset(str(nc_path)) as ds:
-        times = ds.variables["time"]
-        date_objs = num2date(
-            times[:], times.units, getattr(times, "calendar", "standard")
-        )
-    for i, d_obj in enumerate(date_objs):
-        if (d_obj.year, d_obj.month, d_obj.day) == (
-            target.year,
-            target.month,
-            target.day,
-        ):
-            return i
-    raise ValueError(f"Date {target.isoformat()} not found in {nc_path}")
-
-
-def _fetch_swe_day(d, nc_paths, lat_lo, lat_hi, lon_lo, lon_hi):
-    """
-    Read one day of SWE from the NSIDC NetCDF for water_year(d).
-    """
-    wy = _water_year(d)
-    if wy not in nc_paths:
-        raise ValueError(f"No NSIDC file cached for water year {wy}")
-    day_idx = _find_day_index(nc_paths[wy], d)
-    with ncdataset(str(nc_paths[wy])) as ds:
-        arr = ds.variables["SWE"][day_idx, lat_lo:lat_hi, lon_lo:lon_hi]
-    # Convert masked elements (NSIDC fill_value, e.g. -999) to NaN so filled_data
-    # can gap-fill them. np.asarray would strip the mask and expose -999.
-    return np.ma.filled(np.ma.asarray(arr).astype(np.float64), np.nan)
+    paths = _download_snodas_day(d, cache_dir, ("SWE",))
+    if paths is None:
+        _, _, height, width, _ = _grid_window(bbox)
+        return np.full((height, width), np.nan)
+    # flip north-up to south-to-north rows, matching swe.npy
+    return _read_day_on_grid(paths["SWE"], bbox)[::-1, :]
 
 
 def _fetch_prism_day(prism_var, d, cache_dir, bbox):
@@ -113,7 +91,7 @@ def predict(
     Run a trained ConvLSTM on the inputs preceding ``target_date``.
 
     Returns the predicted SWE for ``target_date`` along with the actual
-    NSIDC-0719 SWE for that day and the residual.
+    SNODAS SWE for that day and the residual.
 
     Parameters
     ----------
@@ -130,20 +108,21 @@ def predict(
         "tmp_pcp". Has to match the channel layout the model was
         trained on.
     earthdata_username, earthdata_password : str, optional
-        Override $EARTHDATA_USERNAME / $EARTHDATA_PASSWORD. Handy when
-        the QGIS plugin holds creds in QSettings rather than the env.
+        Deprecated and ignored. SNODAS doesn't need credentials; these
+        are kept so existing callers (e.g. the QGIS plugin) don't break.
 
     Returns
     -------
     dict with keys:
         predicted    : (H, W), denormalized SWE prediction
-        actual       : (H, W), gap-filled NSIDC SWE for target_date
-        actual_raw   : (H, W), raw NSIDC SWE for target_date (NaNs kept)
+        actual       : (H, W), gap-filled SNODAS SWE for target_date
+        actual_raw   : (H, W), raw SNODAS SWE for target_date (NaNs kept)
         residual     : predicted - actual
         target_date  : echoed back
         input_dates  : list of dates fed to the model
         bbox         : (minx, miny, maxx, maxy) used
-        bbox_indices : (lat_lo, lat_hi, lon_lo, lon_hi) into the .nc grid
+        bbox_indices : (lat_lo, lat_hi, lon_lo, lon_hi) into the 4km grid,
+                       with lat indices counted south-to-north
         nc_lat       : 1D latitudes covered
         nc_lon       : 1D longitudes covered
         variant      : echoed back
@@ -161,31 +140,15 @@ def predict(
 
     seq_len = num_days_train - 1  # number of input frames (e.g. 4 for default)
     input_dates = [target_date - timedelta(days=seq_len - i) for i in range(seq_len)]
+    _check_start(input_dates[0])
 
-    # Earthdata creds (kwargs override env vars)
-    user = earthdata_username or os.environ.get("EARTHDATA_USERNAME")
-    pw = earthdata_password or os.environ.get("EARTHDATA_PASSWORD")
-    if not user or not pw:
-        raise RuntimeError(
-            "Earthdata credentials missing. Set EARTHDATA_USERNAME and "
-            "EARTHDATA_PASSWORD, or pass earthdata_username/password kwargs."
-        )
-
-    # Download / locate the NSIDC water-year files needed to cover both the
-    # input window and the target date.
-    needed_wys = sorted({_water_year(d) for d in [*input_dates, target_date]})
-    nc_paths = {wy: _download_nc(wy, cache_dir, user, pw) for wy in needed_wys}
-
-    # Bbox-to-grid-indices using one .nc as the reference grid. All NSIDC-0719
-    # files share the same lat/lon arrays so any of them works.
-    sample_nc = nc_paths[needed_wys[0]]
-    lat_lo, lat_hi, lon_lo, lon_hi = _nc_bbox_indices(sample_nc, manifest.bbox)
-    H = lat_hi - lat_lo
-    W = lon_hi - lon_lo
-
-    with ncdataset(str(sample_nc)) as ds:
-        nc_lat = np.asarray(ds.variables["lat"][:])[lat_lo:lat_hi]
-        nc_lon = np.asarray(ds.variables["lon"][:])[lon_lo:lon_hi]
+    # Window into the 4km grid that SNODAS is resampled onto. Same grid
+    # NSIDC-0719 used, so bbox_indices mean what they used to.
+    row_north, col_west, H, W, _ = _grid_window(manifest.bbox)
+    lat_lo = _GRID_ROWS - (row_north + H)
+    lat_hi = lat_lo + H
+    lon_lo, lon_hi = col_west, col_west + W
+    nc_lat, nc_lon = swe_grid(manifest.bbox)
 
     # Build the (seq_len, H, W, n_channels) input stack
     frames = []
@@ -193,7 +156,7 @@ def predict(
         per_channel = []
         for ch in channels:
             if ch == "SWE":
-                arr = _fetch_swe_day(d, nc_paths, lat_lo, lat_hi, lon_lo, lon_hi)
+                arr = _fetch_swe_day(d, cache_dir, manifest.bbox)
             elif ch == "PCP":
                 arr = _fetch_prism_day("ppt", d, cache_dir, manifest.bbox)
             elif ch == "TMP":
@@ -277,7 +240,7 @@ def predict(
 
     # Actual SWE for target_date (raw + gap-filled, the latter being apples-to-
     # apples with what the model was trained against).
-    actual_raw = _fetch_swe_day(target_date, nc_paths, lat_lo, lat_hi, lon_lo, lon_hi)
+    actual_raw = _fetch_swe_day(target_date, cache_dir, manifest.bbox)
     actual_filled = filled_data(actual_raw[np.newaxis, ...])[0]
 
     residual = predicted - actual_filled
