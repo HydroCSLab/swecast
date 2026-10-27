@@ -140,7 +140,8 @@ class Manifest:
 
     # Training hyperparameters (forklifted from ConvLSTM_*.py defaults)
     num_days_train: int = 5
-    num_days_used: int = 7300
+    #defaults to none if the whole stack is used
+    num_days_used: int | None = None  # None -> whole stack
     epochs: int = 50
     batch_size: int = 16
     train_split: float = 0.8

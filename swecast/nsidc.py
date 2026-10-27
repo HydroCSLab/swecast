@@ -152,8 +152,10 @@ def _fetch_snodas_day(d: date, variables) -> dict | None:
 
     grids = {}
     for var in variables:
+        # Skip variables that are missing either the data or the header
         if var not in data or var not in header_text:
-            raise ValueError(f"{var} product not found in {url}")
+            print(f"[swecast] SNODAS {d}: no {var} product in {url}")
+            continue
         header = _parse_header(header_text[var])
         rows = int(header["Number of rows"])
         cols = int(header["Number of columns"])
@@ -198,7 +200,7 @@ def _write_snodas_tif(grid, header, out: Path):
 
 def _download_snodas_day(d: date, cache_dir: Path, variables) -> dict | None:
     """
-    Return {var: cached native-resolution GeoTIFF} for one day.
+    Return {var: cached native-resolution GeoTIFF | None} for one day.
 
     Returns None (after a warning) if the day is missing from the archive;
     callers write an all-NaN frame that filled_data gap-fills later.
@@ -216,7 +218,7 @@ def _download_snodas_day(d: date, cache_dir: Path, variables) -> dict | None:
         return None
     for var, (grid, header) in grids.items():
         _write_snodas_tif(grid, header, paths[var])
-    return paths
+    return {var: paths[var] if var in grids else None for var in variables}
 
 
 def _read_day_on_grid(tif_path, bbox) -> np.ndarray:
@@ -259,7 +261,8 @@ def _read_stacks(manifest, cache_dir, variables) -> tuple[list, dict]:
         if paths is None:
             continue
         for var in variables:
-            stacks[var][i] = _read_day_on_grid(paths[var], manifest.bbox)
+            if paths[var] is not None:
+                stacks[var][i] = _read_day_on_grid(paths[var], manifest.bbox)
     return dates, stacks
 
 

@@ -52,7 +52,7 @@ def _fetch_swe_day(d, cache_dir, bbox):
     gap-fill them.
     """
     paths = _download_snodas_day(d, cache_dir, ("SWE",))
-    if paths is None:
+    if paths is None or paths["SWE"] is None:
         _, _, height, width, _ = _grid_window(bbox)
         return np.full((height, width), np.nan)
     # flip north-up to south-to-north rows, matching swe.npy
