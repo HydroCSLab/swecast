@@ -44,14 +44,34 @@ def _align_shapes(*arrays):
     """
     Crop (T, H, W) arrays to the smallest common (H, W).
 
-    NSIDC and PRISM resolve the same bbox via different code paths
-    (searchsorted vs. round-to-cell) so they can disagree by a row or
-    column at the edges. Original scripts hardcoded h=142, w=310 and never
-    hit this; bbox-driven extraction does, and np.stack barfs without it.
+    SNODAS is resampled onto the PRISM grid with the same edge math, so
+    shapes should already match; this stays as a safety net for stacks
+    built by older versions, where NSIDC-0719 and PRISM could disagree by a
+    row or column at the edges and np.stack barfs without it.
     """
     H = min(a.shape[-2] for a in arrays)
     W = min(a.shape[-1] for a in arrays)
     return tuple(a[..., :H, :W] for a in arrays)
+
+
+def _days_used(num_days_used, *stacks):
+    """
+    Number of leading days to train on: the whole stack if ``num_days_used``
+    is None, otherwise ``num_days_used`` capped at the shortest stack.
+
+    Asking for more days than the stacks hold used to produce short windows
+    at the end of the series, which np.array can't stack.
+    """
+    available = min(len(s) for s in stacks)
+    if num_days_used is None:
+        return available
+    if num_days_used > available:
+        print(
+            f"[swecast] num_days_used={num_days_used} but the stacks only hold "
+            f"{available} days; using {available}."
+        )
+        return available
+    return num_days_used
 
 
 def _save_model(
@@ -112,7 +132,7 @@ def prepare_training_inputs(
 
     This function executes the SWECAST data-preparation workflow and generates
     the intermediate files required by the ConvLSTM training routines. The
-    workflow includes station acquisition, PRISM and NSIDC stack generation,
+    workflow includes station acquisition, PRISM and SNODAS stack generation,
     gap filling, and construction of station-to-grid-cell mappings used for
     station-based model evaluation.
 
@@ -126,10 +146,9 @@ def prepare_training_inputs(
         SWECAST manifest specifying the study period, spatial domain, data
         acquisition settings, and training configuration.
     cache_dir : str | Path, optional
-        Directory containing cached NSIDC NetCDF files used to obtain the
-        latitude-longitude grid required for station-cell identification.
-        If not specified, defaults to ``manifest.cache_dir`` when available,
-        or ``<output_dir>/.cache``.
+        Directory for cached PRISM and SNODAS downloads. If not specified,
+        defaults to ``manifest.cache_dir`` when available, or
+        ``<output_dir>/.cache``.
 
     Returns
     -------
@@ -152,7 +171,7 @@ def prepare_training_inputs(
     The generated workflow includes:
 
     1. Acquisition of station metadata.
-    2. Construction of PRISM and NSIDC data stacks.
+    2. Construction of PRISM and SNODAS data stacks.
     3. Gap filling of SWE, precipitation, and temperature datasets.
     4. Filtering of stations to the study domain.
     5. Identification of station grid-cell locations for evaluation.
@@ -171,9 +190,11 @@ def prepare_training_inputs(
     stations_csv = get_stations(manifest, output_dir)
 
     # build stacks
-    outputs = build_stacks(manifest, output_dir=output_dir)
+    outputs = build_stacks(manifest, output_dir=output_dir, cache_dir=cache_dir)
     # swe stacks
-    swe_outputs = build_swe_stacks(manifest, output_dir=output_dir)
+    swe_outputs = build_swe_stacks(
+        manifest, output_dir=output_dir, cache_dir=cache_dir
+    )
 
     # Gap-fill SWE stacks (also fills sibling swe.npy -> swe_filled.npy)
     filled_stacks = fill_stacks(swe_outputs)
@@ -190,17 +211,6 @@ def prepare_training_inputs(
             f"Expected {swe_filled} alongside the filled SWE GeoTIFF. "
             "Re-run build_swe_stacks (write_npy=True default) and fill_stacks."
         )
-
-    # Find an NSIDC .nc file for the lat/lon grid used by identify_station_cells
-    cache_dir = _resolve(cache_dir, manifest, "cache_dir", None)
-    cache_dir = Path(cache_dir) if cache_dir else swe_tif.parent / ".cache"
-    nc_files = sorted(cache_dir.glob("4km_SWE_Depth_WY*_v01.nc"))
-    if not nc_files:
-        raise FileNotFoundError(
-            f"No NSIDC NetCDF files found in {cache_dir}. "
-            "Run build_swe_stacks first to populate the cache."
-        )
-    nc_path = nc_files[0]
 
     # Filter the AWDB-style stations CSV to those inside the SWE stack's bbox,
     # then write a 3-column (id, lat, lon) CSV without header, which is what
@@ -224,9 +234,8 @@ def prepare_training_inputs(
     )
 
     station_cells = output_dir / "station_cells.npy"
-    bbox = getattr(manifest, "bbox", None) if manifest is not None else None
     identify_station_cells(
-        formatted_csv, nc_path, output_path=str(station_cells), bbox=bbox
+        formatted_csv, manifest.bbox, output_path=str(station_cells)
     )
 
     return TrainingInputs(
@@ -274,8 +283,8 @@ def train_swe(
         num_days_train, manifest, "num_days_train", 5
     )  # Number of previous time steps to be used forecast next day SWE 5 means it will forecast 5th day SWE using previous 4 days data
     num_days_used = _resolve(
-        num_days_used, manifest, "num_days_used", 7300
-    )  # 20 years of data 20*365
+        num_days_used, manifest, "num_days_used", None
+    )  # None -> whole stack
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -291,6 +300,7 @@ def train_swe(
     # read in SWE data (cast to fp32; Keras weights are fp32 anyway, and this
     # halves the memory footprint of the windowed dataset built below)
     ds = np.load(swe_filled).astype(np.float32, copy=False)
+    num_days_used = _days_used(num_days_used, ds)
     ds1 = ds[0:num_days_used, :, :]
 
     # prepare for model input
@@ -546,8 +556,8 @@ def train_swe_pcp(
         num_days_train, manifest, "num_days_train", 5
     )  # Number of previous time steps to be used forecast next day SWE 5 means it will forecast 5th day SWE using previous 4 days data
     num_days_used = _resolve(
-        num_days_used, manifest, "num_days_used", 7300
-    )  # 20 years of data 20*365
+        num_days_used, manifest, "num_days_used", None
+    )  # None -> whole stack
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -566,6 +576,7 @@ def train_swe_pcp(
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
     ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
+    num_days_used = _days_used(num_days_used, ds_swe, ds_pcp)
     ds1_swe = ds_swe[0:num_days_used, :, :]
     ds1_pcp = ds_pcp[0:num_days_used, :, :]
     ds1_swe, ds1_pcp = _align_shapes(ds1_swe, ds1_pcp)
@@ -790,7 +801,7 @@ def train_swe_tmp(
     os.makedirs(output_dir, exist_ok=True)
 
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_days_used = _resolve(num_days_used, manifest, "num_days_used", 7300)
+    num_days_used = _resolve(num_days_used, manifest, "num_days_used", None)
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -807,6 +818,7 @@ def train_swe_tmp(
     ds_swe = np.load(swe_filled).astype(np.float32, copy=False)
     ds_tmp = np.load(tmp_filled).astype(np.float32, copy=False)
 
+    num_days_used = _days_used(num_days_used, ds_swe, ds_tmp)
     ds1_swe = ds_swe[0:num_days_used, :, :]
     ds1_tmp = ds_tmp[0:num_days_used, :, :]
     ds1_swe, ds1_tmp = _align_shapes(ds1_swe, ds1_tmp)
@@ -996,7 +1008,7 @@ def train_swe_tmp_pcp(
     os.makedirs(output_dir, exist_ok=True)
 
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_days_used = _resolve(num_days_used, manifest, "num_days_used", 7300)
+    num_days_used = _resolve(num_days_used, manifest, "num_days_used", None)
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -1015,6 +1027,7 @@ def train_swe_tmp_pcp(
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
     ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
+    num_days_used = _days_used(num_days_used, ds_swe, ds_tmp, ds_pcp)
     ds1_swe = ds_swe[0:num_days_used, :, :]
     ds1_tmp = ds_tmp[0:num_days_used, :, :]
     ds1_pcp = ds_pcp[0:num_days_used, :, :]
@@ -1212,7 +1225,7 @@ def train_tmp_pcp(
     os.makedirs(output_dir, exist_ok=True)
 
     num_days_train = _resolve(num_days_train, manifest, "num_days_train", 5)
-    num_days_used = _resolve(num_days_used, manifest, "num_days_used", 7300)
+    num_days_used = _resolve(num_days_used, manifest, "num_days_used", None)
     epochs = _resolve(epochs, manifest, "epochs", 50)
     batch_size = _resolve(batch_size, manifest, "batch_size", 16)
     train_split = _resolve(train_split, manifest, "train_split", 0.8)
@@ -1231,6 +1244,7 @@ def train_tmp_pcp(
     ds_pcp = np.load(pcp_filled).astype(np.float32, copy=False)
     ds_pcp = np.where(ds_pcp < 0, 0, ds_pcp)
 
+    num_days_used = _days_used(num_days_used, ds_swe, ds_tmp, ds_pcp)
     ds1_swe = ds_swe[0:num_days_used, :, :]
     ds1_tmp = ds_tmp[0:num_days_used, :, :]
     ds1_pcp = ds_pcp[0:num_days_used, :, :]
@@ -1429,7 +1443,9 @@ def optimize_hyperparameters(swe_filled, output_dir, *, manifest=None, n_trials=
 
     # Load SWE data
     ds = np.load(swe_filled)
-    num_days_used = 7300
+    num_days_used = _days_used(
+        _resolve(None, manifest, "num_days_used", None), ds
+    )
     ds1 = ds[0:num_days_used, :, :]
 
     # Dataset preparation function

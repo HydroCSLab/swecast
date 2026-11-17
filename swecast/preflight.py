@@ -13,17 +13,9 @@ _PACKAGES_PRISM = {
     "shapely": "shapely",
 }
 
-# Additional packages required for NSIDC SWE downloads
+# Additional packages required for SNODAS SWE downloads (hosted by NSIDC)
 _PACKAGES_NSIDC = {
-    "xarray": "xarray",
-    "rioxarray": "rioxarray",
-    "netCDF4": "netcdf4",
-}
-
-# Environment variables required for NSIDC SWE downloads
-_ENV_NSIDC = {
-    "EARTHDATA_USERNAME": "NASA Earthdata username (https://urs.earthdata.nasa.gov)",
-    "EARTHDATA_PASSWORD": "NASA Earthdata password",
+    "scipy": "scipy",
 }
 
 # additional required
@@ -84,7 +76,7 @@ def _finish(failures: list, raise_on_error: bool) -> bool:
 
 def preflight(raise_on_error: bool = True) -> bool:
     """
-    Run all preflight checks (packages + environment variables).
+    Run all preflight checks.
     Called automatically by build_stacks and build_swe_stacks.
     Add new checks here as functionality grows.
     """
@@ -95,8 +87,6 @@ def preflight(raise_on_error: bool = True) -> bool:
     _check_packages(_PACKAGES_PRISM, failures)
     _check_packages(_PACKAGES_NSIDC, failures)
     _check_packages(_PACKAGES_MODELS, failures)
-    print("\nEnvironment variables:")
-    _check_env(_ENV_NSIDC, failures)
     return _finish(failures, raise_on_error)
 
 
@@ -114,7 +104,7 @@ def preflight_models(raise_on_error: bool = True) -> bool:
 
 def preflight_prism(raise_on_error: bool = True) -> bool:
     """
-    Preflight checks for PRISM-only functionality (no Earthdata required).
+    Preflight checks for PRISM-only functionality.
     """
     failures = []
     print("swecast preflight checks (PRISM)")
@@ -126,14 +116,12 @@ def preflight_prism(raise_on_error: bool = True) -> bool:
 
 def preflight_nsidc(raise_on_error: bool = True) -> bool:
     """
-    Preflight checks for NSIDC SWE functionality (includes Earthdata credentials).
+    Preflight checks for SNODAS SWE functionality (no credentials required).
     """
     failures = []
-    print("swecast preflight checks (NSIDC)")
+    print("swecast preflight checks (SNODAS)")
     print("=" * 40)
     print("\nPackages:")
     _check_packages(_PACKAGES_PRISM, failures)
     _check_packages(_PACKAGES_NSIDC, failures)
-    print("\nEnvironment variables:")
-    _check_env(_ENV_NSIDC, failures)
     return _finish(failures, raise_on_error)

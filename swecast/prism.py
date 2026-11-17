@@ -140,7 +140,8 @@ class Manifest:
 
     # Training hyperparameters (forklifted from ConvLSTM_*.py defaults)
     num_days_train: int = 5
-    num_days_used: int = 7300
+    #defaults to none if the whole stack is used
+    num_days_used: int | None = None  # None -> whole stack
     epochs: int = 50
     batch_size: int = 16
     train_split: float = 0.8
@@ -184,9 +185,9 @@ def _date_range_no_leap(start: date, end: date):
     """
     Yield dates from start to end (inclusive), skipping Feb 29.
 
-    NSIDC-0719 uses a 365-day calendar (omits Feb 29). For PRISM and NSIDC
-    .npy stacks to share a time axis, both builders iterate this filtered
-    range so row ``i`` of every stack corresponds to the same calendar date.
+    Kept from the NSIDC-0719 era, which used a 365-day calendar. PRISM and
+    SNODAS .npy builders both iterate this filtered range so row ``i`` of
+    every stack corresponds to the same calendar date.
     """
     for d in _date_range(start, end):
         if not (d.month == 2 and d.day == 29):

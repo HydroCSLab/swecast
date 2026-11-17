@@ -9,8 +9,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from netCDF4 import Dataset as ncdataset
 
+from .nsidc import _GRID_RES, swe_grid
 from .prism import Manifest
 
 API_URL = (
@@ -91,9 +91,7 @@ def get_stations(manifest: Manifest, output_dir: Path) -> Path:
     return cache_path
 
 
-def identify_station_cells(
-    stations_csv, nc_path, output_path="station_cells.npy", bbox=None
-):
+def identify_station_cells(stations_csv, bbox, output_path="station_cells.npy"):
     """
     Forklift of Identify_Station_Cells.py.
 
@@ -103,74 +101,24 @@ def identify_station_cells(
     The input CSV must have no header and columns matching the original
     ../../data/stations.csv layout: column 1 is latitude, column 2 is longitude.
 
-    The corner offset that clips global NetCDF grid indices into local study-region
-    indexing is derived from ``bbox`` via ``_nc_bbox_indices``. If ``bbox`` is None,
-    falls back to (288, 75), the original California study-area constants from
-    Identify_Station_Cells.py.
+    Cells are (row, col) indices into the bbox window of the 4km grid, with
+    rows running south-to-north to match the .npy stacks.
     """
-    # Avoid an import cycle: nsidc imports stations for get_stations,
-    # so we import _nc_bbox_indices lazily here.
-    from .nsidc import _nc_bbox_indices
-
     # this part converts the 104 stations(with replicates) to 75 stations without
     # replicates,and returns the coordinates of this stations in the study region
     # defined by bbox
 
     stations = pd.read_csv(stations_csv, header=None).to_numpy()
-    num_stations = stations.shape[0]
+    lat, lon = swe_grid(bbox)
+    south_edge = lat[0] - _GRID_RES / 2
+    west_edge = lon[0] - _GRID_RES / 2
 
-    # preprocess .nc file, extract SWE and DEPTH data
-    ds = ncdataset(str(nc_path))
-    swe = ds.variables["SWE"]
-    depth = ds.variables["DEPTH"]
+    # the grid is regular, so the containing cell is just floor(offset / res)
+    lonlat = np.zeros((stations.shape[0], 2))
+    lonlat[:, 0] = np.floor((stations[:, 1].astype(float) - south_edge) / _GRID_RES)
+    lonlat[:, 1] = np.floor((stations[:, 2].astype(float) - west_edge) / _GRID_RES)
 
-    # understand the region
-    lat = ds.variables["lat"]
-    lon = ds.variables["lon"]
-    num_lats = len(lat)
-    num_lons = len(lon)
-
-    # Derive the corner offset (was hardcoded (288, 75) in the original)
-    if bbox is not None:
-        lat_lo, _, lon_lo, _ = _nc_bbox_indices(nc_path, bbox)
-        corner_lat, corner_lon = lat_lo, lon_lo
-    else:
-        corner_lat, corner_lon = 288, 75
-
-    lonlat = np.zeros((num_stations, 2))
-
-    # XXX: consider 2D version of np.abs(lon - stations).argmin()
-    for i in range(0, num_stations):
-        for j in range(0, num_lons - 1):
-            # stations[i, 2]: the longitude of station i
-            # lon[j]: j'th longitude in NC
-            # find the cell j or j + 1 that contains station i
-            if (stations[i, 2] - lon[j]) * (lon[j + 1] - stations[i, 2]) > 0:
-                # if station i is in cell j + 1
-                if (stations[i, 2] - lon[j]) >= (lon[j + 1] - stations[i, 2]):
-                    lonlat[i, 1] = j + 1
-                    break
-                else:  # else if station i is in cell j
-                    lonlat[i, 1] = j
-                    break
-            elif lon[j + 1] - stations[i, 2] == 0:
-                lonlat[i, 1] = j + 1
-                break
-
-        for j in range(0, num_lats - 1):
-            if (stations[i, 1] - lat[j]) * (lat[j + 1] - stations[i, 1]) > 0:
-                if (stations[i, 1] - lat[j]) >= (lat[j + 1] - stations[i, 1]):
-                    lonlat[i, 0] = j + 1
-                    break
-                else:
-                    lonlat[i, 0] = j
-                    break
-            elif lat[j + 1] - stations[i, 1] == 0:
-                lonlat[i, 0] = j + 1
-                break
-
-    unique_lonlats = np.unique(lonlat, axis=0)
-    latlon = unique_lonlats - np.array([corner_lat, corner_lon])
+    latlon = np.unique(lonlat, axis=0)
 
     # save the station data
     np.save(output_path, latlon)
